@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Pixelbook: internal audio is off. With the real configuration (pixelbook/audio/avs_eve/audio_config.xml) the v10
-     image froze as soon as the speaker stream opened. This placeholder has no AudioConfig, so Google's dras HAL fails
-     to parse it, retries for about 10 s and then starts its stub module (no sound, the rest of the system boots), as
-     in v9. The real file is in /oem/overlay/vendor/etc and init bind-mounts it over this one when asked: boot entry
-     with androidboot.gbaudio=1, or "setprop debug.pixelbook.audio 1" from adb (see patch_oem.sh). -->
+<!-- Pixelbook audio safe mode. Booting with androidboot.gbaudio=0 (GRUB's "safe mode" entry) bind-mounts this file
+     over /vendor/etc/audio_config.xml. It has no AudioConfig, so Google's dras HAL fails to parse it, retries for
+     about 10 s and then starts its stub module: no sound, and the sound cards are never opened. This is a way back if
+     a driver or firmware change breaks audio again; v10 and v11 froze the machine as soon as the speaker opened,
+     until the AVS driver fix in kernel/apply.sh. -->
 <PixelbookAudioOff/>

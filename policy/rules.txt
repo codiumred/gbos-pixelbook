@@ -1,32 +1,18 @@
 # Extra SELinux allow rules added to the vendor's precompiled policy (on top of gbrunch's own additions).
 # One rule per line: <source type> <target type> <class> <comma separated permissions>
-# Applied by build_eve_image.sh with tools/extend_vendor_policy.c. Keep this list as short as possible.
+# Applied by build_eve_image.sh with gbrunch's tools/extend_vendor_policy.c. Keep this list as short as possible.
 
 # bind-mount the baseline libz.so (/oem/overlay/system/lib64/libz.so) over /system/lib64/libz.so at boot
 init system_lib_file file mounton
 
-# bind-mount the real audio configuration (/oem/overlay/vendor/etc/audio_config.xml) over the placeholder in
-# /vendor/etc when audio is turned on (gbrunch's policy may already allow this; adding it again is harmless)
+# bind-mount files over /vendor/etc and /oem config files: the audio safe-mode placeholder over audio_config.xml,
+# and the disk variant of the fstab (gbrunch's policy already allows this; listing it keeps the dependency visible)
 init vendor_configs_file file mounton
-
-# diagnostics: let the logger and adb shell read /sys/class/backlight/* and /sys/class/leds/* (read-only), to see
-# what the display stack actually writes to the panel backlight
-shell sysfs_leds dir search,read,open,getattr
-shell sysfs_leds file read,open,getattr
-shell sysfs_leds lnk_file read,getattr
 
 # bind-mount the fixed AVS audio driver (/oem/overlay/vendor/lib/modules/snd-soc-avs.ko) over Google's module
 init vendor_kernel_modules file mounton
 
-# diagnostics: read the previous boot's kernel log from ramoops (/sys/fs/pstore), for the logger and adb shell
+# the logger (and adb shell) may read the previous boot's kernel log from ramoops (/sys/fs/pstore): after a crash
+# and warm reboot this is the only record of what happened
 shell pstorefs dir search,read,open,getattr
 shell pstorefs file read,open,getattr
-
-# diagnostics: let adb shell open the ALSA devices (/dev/snd/*) to step through a speaker stream by hand and find
-# the call that freezes the machine; remove once audio works
-shell audio_device dir search,read,open,getattr
-shell audio_device chr_file open,read,write,ioctl,getattr,map
-
-# diagnostics: let adb shell open the UVC camera (/dev/video*) to test V4L2 buffer allocation directly (the camera
-# HAL fails at VIDIOC_REQBUFS-like "BufferAllocation"); remove once the camera works
-shell video_device chr_file open,read,write,ioctl,getattr,map

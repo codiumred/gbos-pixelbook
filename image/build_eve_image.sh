@@ -41,11 +41,23 @@ CONFIG_FRAGMENTS="$HERE/kernel/eve.config" bash "$HERE/kernel/build.sh" "$K" "$O
 	INSTALL_MOD_PATH="$W/eve/staging" INSTALL_MOD_STRIP=1 modules_install > "$W/eve/modules_install.log" 2>&1
 REL="$(ls "$W/eve/staging/lib/modules")"
 
-# 3. initrd = gbrunch initrd + overlay (later cpio members replace earlier ones)
-python3 - "$W" "$REL" "$MODS" "$FW" <<'PY'
+# 3. initrd = gbrunch initrd + overlay (later cpio members replace earlier ones).
+#    The eMMC controller driver joins the first stage too: the MMC core, block layer and SDHCI are built into the
+#    kernel, but the Pixelbook's controller (8086:9d2b) needs sdhci-pci.ko, a Google vendor module that lives in
+#    vendor_dlkm. On an internal install vendor_dlkm is itself on the eMMC, so the first stage must bring it.
+GMODS="cqhci.ko sdhci-uhs2.ko sdhci-pci.ko"
+rm -rf "$W/eve/gmods"; mkdir -p "$W/eve/gmods"
+DLKM0="$(python3 "$IMG/lp_offset.py" "$W/native.raw" vendor_dlkm_a | cut -d' ' -f1)"
+for m in $GMODS modules.dep; do
+	dump.erofs --offset="$DLKM0" --cat --path="/lib/modules/$m" "$W/native.raw" > "$W/eve/gmods/$m"
+	[ -s "$W/eve/gmods/$m" ] || { echo "vendor_dlkm has no $m"; exit 1; }
+done
+python3 - "$W" "$REL" "$MODS" "$FW" "$GMODS" <<'PY'
 import gzip, pathlib, sys
 W, rel, mods, fws = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3].split(), sys.argv[4].split()
+gmods = sys.argv[5].split()
 stage = W / "eve/staging/lib/modules" / rel
+gdir = W / "eve/gmods"
 
 def entry(name, data, mode, ino):
     n = name.encode() + bytes(1)
@@ -61,6 +73,14 @@ for line in (stage / "modules.dep").read_text().splitlines():
 files, ino = [], 980000
 for m in mods:
     files.append((f"lib/modules/{m}", found[m].read_bytes(), 0o100644))
+for line in (gdir / "modules.dep").read_text().splitlines():
+    k, _, v = line.partition(":")
+    if k.rsplit("/", 1)[-1] in gmods:
+        dep[k.rsplit("/", 1)[-1]] = [d.rsplit("/", 1)[-1] for d in v.split()]
+for m in gmods:
+    assert all(d in gmods for d in dep.get(m, [])), (m, dep.get(m))
+    files.append((f"lib/modules/{m}", (gdir / m).read_bytes(), 0o100644))
+mods = mods + gmods
 deps = "".join(f"/lib/modules/{m}:" + "".join(f" /lib/modules/{d}" for d in dep.get(m, [])) + "\n" for m in mods)
 load = "".join(m + "\n" for m in mods)
 alias = "".join(l + "\n" for l in (stage / "modules.alias").read_text().splitlines()
@@ -85,7 +105,11 @@ print("initrd:", (W / "eve-initrd.gz").stat().st_size, "bytes; first-stage modul
 PY
 
 # 4. kernel command line: gbrunch's, minus the PC serial console, plus board options
-BASE="$(sed -E 's/ ?console=ttyS0,115200//; s/ ?earlycon=[^ ]+//' "$W/gbrunch-cmdline.txt")"
+# androidboot.boot_part_uuid names the boot_a partition of the disk Android should use. It is removed here and set by
+# the menu at boot time instead (see grub.cfg below), so the same menu works on the USB stick and on an internal
+# install whose partitions have fresh UUIDs.
+BASE="$(sed -E 's/ ?console=ttyS0,115200//; s/ ?earlycon=[^ ]+//; s/ ?androidboot\.boot_part_uuid=[^ ]+//' "$W/gbrunch-cmdline.txt")"
+UUID0="$(grep -o 'androidboot\.boot_part_uuid=[^ ]*' "$W/gbrunch-cmdline.txt" | cut -d= -f2)"
 # module_blacklist: keep Google's userland away from the Pixelbook's Cr50 TPM (ChromeOS owns it) during
 # these experiments, and skip cros_ec_debugfs as Google's own command line does.
 # snd_intel_dspcfg.dsp_driver=4 selects the AVS driver for the Kaby Lake audio DSP. The shipped kernel has
@@ -109,30 +133,56 @@ CRASH="panic=10 panic_on_oops=1 softlockup_panic=1 hardlockup_panic=1 nmi_watchd
 cat > "$W/eve/grub.cfg" <<EOF
 set timeout=5
 set default=0
+insmod regexp
+insmod probe
 insmod smbios
+# The disk this menu was loaded from: \$root is e.g. (hd1,gpt12), so gb_disk is hd1. Android's first stage uses the
+# disk whose boot_a partition (GPT entry 13) has the UUID passed as androidboot.boot_part_uuid.
+regexp --set=1:gb_disk '^\(([^,]+),' "\$root"
+probe --set=gb_boot_uuid --part-uuid "(\$gb_disk,gpt13)"
+if [ -z "\$gb_boot_uuid" ]; then set gb_boot_uuid=$UUID0; fi
+# /data in RAM unless this disk was set up by the internal installer, which writes "set gb_data=disk" here
+set gb_data=ram
+if [ -f /EFI/GBRUNCH/install.cfg ]; then source /EFI/GBRUNCH/install.cfg; fi
 smbios --type=1 --get-string=4 --set=system_vendor
 if [ "\$system_vendor" = "QEMU" ]; then
  serial --unit=0 --speed=115200
  terminal_output console serial
- set default=2
+ set default=3
 fi
-menuentry 'Googlebook OS on Pixelbook (internal audio off)' {
- echo 'Loading rebuilt 6.18 kernel with i915. The screen stays blank until Android draws.'
- linux /EFI/GBRUNCH/kernel $DEV
+menuentry 'Googlebook OS' {
+ echo 'Starting. The screen stays black until Android draws (about a minute).'
+ linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data
  initrd /EFI/GBRUNCH/initrd.gz
 }
-menuentry 'Audio crash test: audio on, reboots itself after a freeze (keeps the kernel log)' {
- echo 'Audio on. It should freeze, then reboot within about a minute. Then boot the first entry.'
- echo 'If it stays frozen for 2 minutes, press Refresh+Power (not a long power press).'
- linux /EFI/GBRUNCH/kernel $DEV androidboot.gbaudio=1 $CRASH
+menuentry 'Googlebook OS, safe mode: internal audio off' {
+ linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data androidboot.gbaudio=0
  initrd /EFI/GBRUNCH/initrd.gz
 }
-menuentry 'Same, with serial console and emulation profiling (QEMU)' {
- linux /EFI/GBRUNCH/kernel $DEV console=ttyS0,115200 earlycon=uart8250,io,0x3f8,115200 isa_emu=profile
+menuentry 'Debug: crash capture (reboots itself after a freeze and keeps the kernel log)' {
+ echo 'If it freezes it should reboot within a minute. If not, press Refresh+Power (not a long power press).'
+ linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data $CRASH
+ initrd /EFI/GBRUNCH/initrd.gz
+}
+menuentry 'Serial console and emulation profiling (QEMU)' {
+ linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data console=ttyS0,115200 earlycon=uart8250,io,0x3f8,115200 isa_emu=profile
  initrd /EFI/GBRUNCH/initrd.gz
 }
 menuentry 'UEFI firmware settings' { fwsetup }
 EOF
+
+# GRUB itself: gbrunch's prebuilt loader finds its menu by a FAT volume serial, which would be ambiguous with the
+# USB stick and an internal install connected at once. This loader reads the menu from the partition it was itself
+# started from (\$cmdpath), so each disk always boots its own menu.
+cat > "$W/eve/grub-early.cfg" <<'EOF'
+insmod part_gpt
+insmod fat
+insmod regexp
+regexp --set=1:root '^(\([^)]+\))' "$cmdpath"
+configfile /EFI/GBRUNCH/grub.cfg
+EOF
+grub-mkstandalone -O x86_64-efi --fonts= --locales= --themes= --compress=xz -o "$W/eve/BOOTX64.EFI" \
+	"boot/grub/grub.cfg=$W/eve/grub-early.cfg"
 
 # 5. image: copy of gbrunch's, with the three boot files replaced on the EFI partition
 rm -f "$W/eve.raw"
@@ -190,9 +240,8 @@ ARGS+=("etc/data/hal_configs/audio_default.xml=$HERE/audio/audio_default.xml:$CF
 	# dras only resolves <audio-config-dir> when it also knows the board model (it does not here: "Both card_name,
 	# model should be provided") and then reads these fixed paths instead (seen in usb-dump8: "Failed to read
 	# /vendor/etc/audio_config.xml" after finding card avsmax98927). Same files, default location.
-	# audio_config.xml there is a placeholder that keeps audio off: the real one froze v10 when the speaker stream
-	# opened. The real file goes to /oem/overlay (below) and is bind-mounted over the placeholder only on request.
-	"etc/audio_config.xml=$HERE/audio/audio_config.off.xml:$CFGLBL"
+	# (v10-v12 shipped a placeholder here while the speaker froze the machine; the AVS driver fix ended that.)
+	"etc/audio_config.xml=$HERE/audio/avs_eve/audio_config.xml:$CFGLBL"
 	"etc/mixer_paths.xml=$HERE/audio/avs_eve/mixer_paths.xml:$CFGLBL"
 	"etc/volume_curves.xml=$W/eve/vcfg/volume_curves.xml:$CFGLBL")
 
@@ -211,7 +260,8 @@ ARGS+=("usr/keylayout/AT_Translated_Set_2_keyboard.kl=$W/eve/vcfg/AT_Translated_
 
 DONOR="${DONOR_SUPER:-$IN/donor/super.raw}"
 rm -rf "$W/eve/oemfiles"; mkdir -p "$W/eve/oemfiles/system/lib64" "$W/eve/oemfiles/vendor/etc" "$W/eve/oemfiles/vendor/lib/modules"
-install -m 0644 "$HERE/audio/avs_eve/audio_config.xml" "$W/eve/oemfiles/vendor/etc/audio_config.xml"
+# audio safe mode: this placeholder is bind-mounted over the real config with androidboot.gbaudio=0 (patch_oem.sh)
+install -m 0644 "$HERE/audio/audio_config.off.xml" "$W/eve/oemfiles/vendor/etc/audio_config.xml"
 # Fixed AVS audio DSP driver (array overrun in avs_path_set_constraint crashed the machine when the speaker opened;
 # see kernel/apply.sh), built from the patched tree with the same symbol versions as Google's prebuilt and
 # bind-mounted over /vendor/lib/modules/snd-soc-avs.ko before ueventd loads it (patch_oem.sh).
@@ -264,6 +314,7 @@ PY
 mcopy -o -i "$W/eve.raw@@$OFF" "$O/arch/x86/boot/bzImage" ::/EFI/GBRUNCH/kernel
 mcopy -o -i "$W/eve.raw@@$OFF" "$W/eve-initrd.gz" ::/EFI/GBRUNCH/initrd.gz
 mcopy -o -i "$W/eve.raw@@$OFF" "$W/eve/grub.cfg" ::/EFI/GBRUNCH/grub.cfg
+mcopy -o -i "$W/eve.raw@@$OFF" "$W/eve/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 mdir -i "$W/eve.raw@@$OFF" ::/EFI/GBRUNCH | sed -n 4,12p
 ls -la "$W/eve.raw"
 sha256sum "$O/arch/x86/boot/bzImage" "$W/eve-initrd.gz" | sed "s#$W/##; s#$O/##" | tee "$W/eve/boot-files.sha256"

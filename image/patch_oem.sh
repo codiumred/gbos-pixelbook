@@ -124,19 +124,22 @@ on early-init
 """
 
 AUDIO = """
-# --- pixelbook: internal audio is opt-in. /vendor/etc/audio_config.xml is a placeholder that makes Google's dras HAL
-# start its stub module (no sound); with the real configuration v10 froze as soon as the speaker stream opened.
-# The real file is bind-mounted over the placeholder either for the whole boot (GRUB entry with
-# androidboot.gbaudio=1) or live from adb with "setprop debug.pixelbook.audio 1", which then restarts the audio
-# HAL and audioserver so the freeze can be watched from another machine. A reboot always comes back without it. ---
-on init && property:ro.boot.gbaudio=1
+# --- pixelbook: audio safe mode. /vendor/etc/audio_config.xml is the Pixelbook's audio configuration. Booting with
+# androidboot.gbaudio=0 (GRUB's "safe mode" entry) bind-mounts a placeholder over it: Google's dras HAL then starts
+# its stub module and leaves the sound cards alone. A way back if a driver or firmware change breaks audio again
+# (v10-v11 froze the machine whenever the speaker opened, see kernel/apply.sh). ---
+on init && property:ro.boot.gbaudio=0
     mount none /oem/overlay/vendor/etc/audio_config.xml /vendor/etc/audio_config.xml bind
+"""
 
-on property:debug.pixelbook.audio=1
-    mount none /oem/overlay/vendor/etc/audio_config.xml /vendor/etc/audio_config.xml bind
-    stop audioserver
-    restart vendor.audio-hal-aidl
-    start audioserver
+DATAMODE = """# --- pixelbook: where /data lives. fstab.android-desktop puts /data in RAM (tmpfs, the default: a USB stick is far
+# too slow for Android's small writes). Booting with androidboot.gbdata=disk, which the internal-disk installer sets
+# in the EFI partition's install.cfg, mounts fstab.android-desktop.disk over it instead: /data is then the ext4
+# userdata partition and survives reboots. This block must stay ahead of gbrunch's early-init action, which binds
+# the fstab into /vendor/etc; actions with the same trigger run in file order. ---
+on early-init && property:ro.boot.gbdata=disk
+    mount none /oem/fstab.android-desktop.disk /oem/fstab.android-desktop bind
+
 """
 
 NOSUSPEND = """
@@ -176,8 +179,11 @@ def rc(text):
         text = text.rstrip("\n") + "\n" + LIBZ
     if ovl and os.path.isfile(os.path.join(ovl, "vendor/lib/modules/snd-soc-avs.ko")) and "pixelbook: fixed AVS audio DSP driver" not in text:
         text = text.rstrip("\n") + "\n" + AVSMOD
-    if ovl and os.path.isfile(os.path.join(ovl, "vendor/etc/audio_config.xml")) and "pixelbook: internal audio is opt-in" not in text:
+    if ovl and os.path.isfile(os.path.join(ovl, "vendor/etc/audio_config.xml")) and "pixelbook: audio safe mode" not in text:
         text = text.rstrip("\n") + "\n" + AUDIO
+    if "pixelbook: where /data lives" not in text:
+        first = text.index("\non early-init\n") + 1     # gbrunch's own early-init action
+        text = text[:first] + DATAMODE + text[first:]
     # the logger must be able to read /dev/input/event* (group input) for the touchpad and function-key traces
     stanza = re.search(r"service gbrunch\.persistlogs .*?\n\n", text, re.S)
     if stanza and "readproc input" not in stanza.group(0):
@@ -200,6 +206,15 @@ def fstab(text):
     return "\n".join(out)
 
 rewrite("fstab.android-desktop", fstab)
+
+# the disk variant: gbrunch's fstab as it was (ext4 userdata for /data), selected at boot by androidboot.gbdata=disk
+disk = oem / "fstab.android-desktop.disk"
+src = (oem / "fstab.android-desktop").read_text()
+disk.write_text("\n".join(l for l in src.split("\n") if not l.startswith("tmpfs /data ")))
+os.chmod(disk, 0o644)
+os.chown(disk, 0, 0)
+os.setxattr(disk, "security.selinux", b"u:object_r:vendor_configs_file:s0")
+print("wrote fstab.android-desktop.disk")
 PY
 # 3a. a more useful logger: bigger budget (the 24 MiB default stopped the snapshots after ~10), more snapshots,
 #     bigger logcat ring (an error flood overwrote the first failure), plus input, emulation and ANR state.
@@ -235,7 +250,6 @@ if "PIXELBOOK_LOGGER_EXTRAS" not in t:
     capture "$n-swap.txt" sh -c 'cat /proc/swaps; df -k /data; getprop | grep -E "mmd|zram|ram_based"; grep -E "^(Shmem|SwapTotal|SwapFree|MemAvailable):" /proc/meminfo'
     capture "$n-cpufreq.txt" sh -c 'for c in /sys/devices/system/cpu/cpu[0-3]; do echo "$c $(cat $c/cpufreq/scaling_governor) cur=$(cat $c/cpufreq/scaling_cur_freq) max=$(cat $c/cpufreq/scaling_max_freq)"; done; for z in /sys/class/thermal/thermal_zone*; do echo "$z $(cat $z/type) $(cat $z/temp)"; done'
     if [ "$n" = 02 ] || [ "$n" = 10 ] || [ "$n" = 30 ]; then
-        capture "$n-backlight.txt" sh -c 'ls -l /sys/class/backlight /sys/class/leds; for b in /sys/class/backlight/*; do echo "$b $(cat $b/brightness) / $(cat $b/max_brightness)"; done; getprop ro.vendor.lights.backlight.enabled; dumpsys -t 5 display | grep -iE "mBacklight|Display Brightness"'
         capture "$n-audio-log.txt" sh -c 'logcat -b all -d -v threadtime | grep -E " dras |AudioFlinger|audioserver|AudioPolicy|AlsaCard|tinyalsa" | tail -n 400'
         capture "$n-sound.txt" sh -c 'ls -l /dev/snd; cat /proc/asound/cards /proc/asound/pcm; dmesg | grep -iE "avs|snd_|asoc|rt5663|rt5514|max98927|hdaudio" | tail -n 120'
     fi
