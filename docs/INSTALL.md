@@ -24,6 +24,24 @@ If you choose the full ROM: when the script offers to back up the stock firmware
 copy it to another computer. It contains your device's own data (serial number, hardware ID) and is the only way back
 to stock firmware without special hardware.
 
+### Disabling write protection on EVE without opening it
+
+The Pixelbook's write protection is held by its Cr50 security chip. From ChromeOS, without a cable or disassembly
+([MrChromebox: gsctool method](https://docs.mrchromebox.tech/docs/firmware/wp/disabling.html)), keeping the charger
+connected throughout:
+
+1. In developer mode, open VT2 (CTRL+ALT+F2, or CTRL+ALT+→ on the top row), log in as `chronos`.
+2. `sudo gsctool -a -o`, then press the power button each time it says "Press PP button now!" (a few minutes of
+   prompts). It ends with "PP Done!" and the Pixelbook reboots into verified mode: enable developer mode again
+   (this wipes ChromeOS's user data) and return to VT2.
+3. `sudo gsctool -a -w disable`, press the power button when asked.
+4. Check: `sudo gsctool -a -w` must print `Flash WP: forced disabled`.
+5. Without powering off, run MrChromebox's firmware utility script, pick **Install/Update UEFI (Full ROM) Firmware**
+   and save the stock firmware backup when asked.
+
+This disable lasts until the security chip next reboots (a full power-off). That is fine: it only has to hold until
+the flash is done. After the full ROM is installed, ChromeOS's `gsctool` is gone with ChromeOS.
+
 ## 2. Write the image to a USB stick
 
 Use a 32 GB USB stick (the image is 28.7 GB). A faster stick helps, but app data lives in RAM by default anyway,
