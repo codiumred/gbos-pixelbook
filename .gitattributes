@@ -1,0 +1,16 @@
+# Scripts and sources are run under WSL/Linux and built there: never convert them to CRLF.
+*.sh   text eol=lf
+*.py   text eol=lf
+*.c    text eol=lf
+*.h    text eol=lf
+*.rc   text eol=lf
+*.xml  text eol=lf
+*.patch text eol=lf
+*.config text eol=lf
+*.ps1  text eol=crlf
+*.txt text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+*.idc text eol=lf
+*.kl text eol=lf
+*.ps1 text eol=crlf

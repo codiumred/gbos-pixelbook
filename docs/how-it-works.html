@@ -1,0 +1,784 @@
+<title>Inside the Pixelbook Port</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Literata:opsz,wght@7..72,400;7..72,600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column of chapters; each chapter holds one hands-on instrument (stack, trap lab, boot walk, stepper, chain). */
+:root {
+  --bg: #ECEFF2;
+  --panel: #FFFFFF;
+  --panel-2: #F5F7F9;
+  --ink: #17202A;
+  --muted: #56636F;
+  --line: #C8D0D7;
+  --accent: #C85A17;
+  --google: #66717D;
+  --ours: #2260C4;
+  --borrowed: #8446C2;
+  --ok: #24804F;
+  --bad: #BE3129;
+  --warn: #A86B12;
+  --chip-google: #E3E7EB;
+  --chip-ours: #DCE7F8;
+  --chip-borrowed: #ECE1F7;
+  --chip-ok: #DAF0E3;
+  --chip-bad: #F7DEDC;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Literata", Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E1318; --panel: #161D24; --panel-2: #1B232B; --ink: #E2E8EE; --muted: #93A1AE; --line: #2B3641;
+    --accent: #EE8A40; --google: #8E9AA6; --ours: #6A9DF0; --borrowed: #B78BEA; --ok: #55BB86; --bad: #EA6B62; --warn: #E2AA4D;
+    --chip-google: #252E37; --chip-ours: #1C2C47; --chip-borrowed: #2D2340; --chip-ok: #18382A; --chip-bad: #42201E;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E1318; --panel: #161D24; --panel-2: #1B232B; --ink: #E2E8EE; --muted: #93A1AE; --line: #2B3641;
+  --accent: #EE8A40; --google: #8E9AA6; --ours: #6A9DF0; --borrowed: #B78BEA; --ok: #55BB86; --bad: #EA6B62; --warn: #E2AA4D;
+  --chip-google: #252E37; --chip-ours: #1C2C47; --chip-borrowed: #2D2340; --chip-ok: #18382A; --chip-bad: #42201E;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 17px; line-height: 1.6; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 80px; }
+h1, h2, h3 { font-family: var(--font-display); line-height: 1.12; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2.1rem, 5.4vw, 3.6rem); font-weight: 800; letter-spacing: -0.02em; }
+h2 { font-size: clamp(1.5rem, 3.4vw, 2.2rem); font-weight: 700; letter-spacing: -0.01em; }
+h3 { font-size: 1.15rem; font-weight: 700; }
+p { margin: 0; max-width: 66ch; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.74rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.muted { color: var(--muted); }
+.mono { font-family: var(--font-mono); font-size: 0.86em; }
+code { font-family: var(--font-mono); font-size: 0.84em; background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; padding: 0.05em 0.35em; overflow-wrap: anywhere; }
+a { color: var(--ours); }
+button { font: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* top nav */
+.toc { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); }
+.toc-inner { max-width: 1040px; margin: 0 auto; padding-inline: 20px; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.toc a { flex: none; font-family: var(--font-mono); font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); text-decoration: none; padding: 11px 9px; border-bottom: 2px solid transparent; }
+.toc a:hover, .toc a.on { color: var(--ink); border-bottom-color: var(--accent); }
+
+/* hero */
+.hero { display: grid; gap: 22px; padding-block: 34px 10px; }
+.hero .lede { font-size: 1.12rem; color: var(--muted); }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-top: 6px; }
+.fact { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 2px; }
+.fact .k { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.fact .v { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; }
+.fact .s { font-size: 0.85rem; color: var(--muted); line-height: 1.4; }
+
+section.chapter { padding-block: 56px 8px; display: grid; gap: 18px; scroll-margin-top: 50px; }
+.chapter > header { display: grid; gap: 8px; }
+
+/* legend chips */
+.legend { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 99px; border: 1px solid transparent; white-space: nowrap; }
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.chip.google { background: var(--chip-google); color: var(--google); }
+.chip.ours { background: var(--chip-ours); color: var(--ours); }
+.chip.borrowed { background: var(--chip-borrowed); color: var(--borrowed); }
+.chip.ok { background: var(--chip-ok); color: var(--ok); }
+.chip.bad { background: var(--chip-bad); color: var(--bad); }
+.tag { font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
+.tag.v { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.tag.i { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+
+/* stack explorer */
+.stack { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.layers { display: flex; flex-direction: column-reverse; gap: 6px; }
+.layer { text-align: left; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; transition: transform .15s ease, border-color .15s ease; }
+.layer:hover { transform: translateX(3px); }
+.layer[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+.layer .ln { font-family: var(--font-display); font-weight: 700; font-size: 1rem; }
+.layer .bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--panel-2); }
+.layer .bar span { display: block; height: 100%; }
+.layer-detail { padding: 18px 20px; display: grid; gap: 14px; min-width: 0; }
+.items { display: grid; gap: 8px; }
+.item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 12px; border-radius: 8px; background: var(--panel-2); }
+.item .t { font-weight: 600; }
+.item .d { font-size: 0.93rem; color: var(--muted); }
+
+/* trap lab */
+.lab { padding: 18px; display: grid; gap: 16px; }
+.lab-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.ctl { display: grid; gap: 6px; }
+.ctl label, .ctl .lbl { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+select, .seg button { font-family: var(--font-body); font-size: 0.95rem; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); border-radius: 8px; padding: 8px 10px; }
+.toggles { display: grid; gap: 6px; }
+.tog { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.95rem; }
+.tog input { width: 18px; height: 18px; accent-color: var(--accent); }
+.run-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.btn { cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 8px; padding: 9px 16px; font-family: var(--font-display); font-weight: 700; }
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn:disabled { opacity: .5; cursor: default; }
+.lane-wrap { overflow-x: auto; border: 1px dashed var(--line); border-radius: 8px; background: var(--panel-2); }
+.lane { display: flex; gap: 4px; padding: 10px; min-height: 52px; align-items: center; }
+.ins { flex: none; font-family: var(--font-mono); font-size: 0.7rem; padding: 6px 7px; border-radius: 5px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); transition: background .12s, color .12s, border-color .12s; }
+.ins.native.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); }
+.ins.trap { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); font-weight: 600; }
+.ins.trap.done { background: var(--accent); color: #fff; }
+.ins.skip { opacity: .35; text-decoration: line-through; }
+.ins.dead { background: var(--bad); color: #fff; border-color: var(--bad); }
+.ins.now { outline: 2px solid var(--ink); }
+.meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.meter { padding: 10px 12px; border-radius: 8px; background: var(--panel-2); display: grid; gap: 2px; }
+.meter .k { font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.meter .v { font-family: var(--font-display); font-weight: 800; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.costbar { height: 12px; border-radius: 6px; background: var(--panel-2); overflow: hidden; display: flex; }
+.costbar span { height: 100%; transition: width .2s; }
+.verdict { padding: 12px 14px; border-radius: 8px; border-left: 4px solid var(--line); background: var(--panel-2); font-size: 0.97rem; }
+.verdict.bad { border-left-color: var(--bad); }
+.verdict.ok { border-left-color: var(--ok); }
+.verdict.slow { border-left-color: var(--warn); }
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.card { padding: 14px 16px; display: grid; gap: 8px; }
+
+/* boot walk */
+.boot { display: grid; gap: 14px; }
+.rail { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; }
+.stop { flex: 1 0 86px; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 8px; padding: 8px 8px; font-family: var(--font-mono); font-size: 0.68rem; text-align: left; display: grid; gap: 2px; }
+.stop b { font-family: var(--font-display); font-size: 0.9rem; color: var(--ink); font-weight: 700; }
+.stop[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.stage { padding: 18px 20px; display: grid; gap: 14px; }
+.stage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.stage-grid > div { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.stage-grid h4 { margin: 0; font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.bug { padding: 10px 12px; border-radius: 8px; background: var(--panel-2); font-size: 0.93rem; display: grid; gap: 4px; }
+.bug .vv { font-family: var(--font-mono); font-size: 0.7rem; color: var(--accent); }
+.nav-row { display: flex; gap: 8px; justify-content: space-between; flex-wrap: wrap; }
+
+/* audio stepper */
+.stepper { padding: 18px; display: grid; gap: 16px; }
+.arrays { display: grid; gap: 10px; }
+.arr { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: center; }
+.arr .nm { font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); }
+.cells { display: flex; gap: 4px; flex-wrap: wrap; }
+.cell { width: 64px; height: 40px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); display: grid; place-items: center; font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); position: relative; }
+.cell.alloc { background: var(--panel); border-color: color-mix(in srgb, var(--ours) 45%, var(--line)); }
+.cell.full { color: var(--ink); background: var(--chip-ours); }
+.cell.over { border-style: dashed; color: var(--bad); }
+.cell.boom { background: var(--bad); color: #fff; border-color: var(--bad); }
+.cell .ix { position: absolute; top: -9px; left: 4px; font-size: 0.6rem; color: var(--muted); background: var(--panel); padding: 0 3px; border-radius: 3px; }
+.modlist { display: flex; gap: 6px; flex-wrap: wrap; }
+.mod { font-family: var(--font-mono); font-size: 0.72rem; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); }
+.mod.cp { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.mod.cur { outline: 2px solid var(--accent); }
+.mod.seen { opacity: .55; }
+.codebox { font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.55; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; white-space: pre; }
+.codebox .hl { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* trust chain */
+.chain { display: grid; gap: 10px; }
+.link { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 12px; align-items: start; padding: 12px 14px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
+.link .dot { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-display); font-weight: 800; color: #fff; background: var(--ok); }
+.link.broken .dot { background: var(--bad); }
+.link.after .dot { background: var(--google); }
+.link.broken { border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; cursor: pointer; background: var(--panel); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+
+/* decisions */
+.deck { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+.dec { padding: 16px; display: grid; gap: 8px; align-content: start; }
+.dec ul { margin: 0; padding-left: 1.1em; font-size: 0.93rem; display: grid; gap: 4px; }
+details.gl { border-bottom: 1px solid var(--line); padding-block: 8px; }
+details.gl summary { cursor: pointer; font-family: var(--font-display); font-weight: 700; }
+details.gl p { margin-top: 6px; font-size: 0.95rem; color: var(--muted); }
+
+footer { margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 0.85rem; color: var(--muted); display: grid; gap: 6px; }
+
+@media (max-width: 720px) {
+  .stack { grid-template-columns: minmax(0, 1fr); }
+  body { font-size: 16px; }
+  .cell { width: 52px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+</style>
+
+<nav class="toc" aria-label="Chapters">
+  <div class="toc-inner">
+    <a href="#stack">The stack</a>
+    <a href="#cpu">The CPU problem</a>
+    <a href="#boot">Boot, stage by stage</a>
+    <a href="#audio">The audio freeze</a>
+    <a href="#continue">Continue On</a>
+    <a href="#next">What's next</a>
+    <a href="#glossary">Glossary</a>
+  </div>
+</nav>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">Project explainer · state as of v12, 18 Oct 2026</div>
+  <h1>Inside the Pixelbook Port</h1>
+  <p class="lede">Google built Googlebook OS for laptops from 2024 onward. Your Pixelbook is from 2017. Getting one onto the other meant working at every level of the machine: the CPU, the kernel, the drivers, Android's own startup scripts and security rules. This page walks through each level, what Google ships, what we changed, and why.</p>
+  <div class="facts">
+    <div class="fact"><span class="k">Machine</span><span class="v">Pixelbook 2017 (EVE)</span><span class="s">Core i5-7Y57, Kaby Lake, 8 GB RAM, 116.5 GB eMMC</span></div>
+    <div class="fact"><span class="k">Operating system</span><span class="v">Googlebook OS</span><span class="s">Lenovo "ruby" recovery image, Android 17, build 16452207</span></div>
+    <div class="fact"><span class="k">Kernel</span><span class="v">6.18.21-android17-5</span><span class="s">Google's source, rebuilt by us with five changes</span></div>
+    <div class="fact"><span class="k">Working on the device</span><span class="v">GPU, Wi-Fi, BT, touch, camera, sound</span><span class="s">Not working: Continue On, phone-assisted setup, suspend</span></div>
+  </div>
+  <div class="legend" aria-label="Legend">
+    <span class="chip google">Google's, unchanged</span>
+    <span class="chip ours">Written or changed by us</span>
+    <span class="chip borrowed">Borrowed (AOSP, gbrunch, ChromeOS, linux-firmware)</span>
+    <span class="tag v">verified</span>
+    <span class="tag i">inferred</span>
+  </div>
+</header>
+
+<!-- ============ STACK ============ -->
+<section class="chapter" id="stack">
+  <header>
+    <div class="eyebrow">Chapter 1</div>
+    <h2>The stack, layer by layer</h2>
+    <p class="muted">A computer runs as a tower of layers. Each one only talks to the layer below it. Click a layer to see who wrote what in it. The coloured bar shows the rough mix.</p>
+  </header>
+  <div class="stack">
+    <div class="layers" id="layers" role="group" aria-label="Layers, bottom is hardware"></div>
+    <div class="panel layer-detail" id="layerDetail" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- ============ CPU ============ -->
+<section class="chapter" id="cpu">
+  <header>
+    <div class="eyebrow">Chapter 2</div>
+    <h2>The CPU problem, and the trap lab</h2>
+    <p>A program is a list of instructions the CPU knows. Every few years Intel adds new ones. Google compiled Googlebook OS for newer chips, so its programs contain instructions your Kaby Lake CPU has never heard of: <code>GFNI</code>, <code>AVX-VNNI</code>, <code>SHA-NI</code> and wide <code>VAES</code>. When the CPU meets one, it stops and raises an "invalid opcode" fault, and normally the program dies. The very first program Android starts, <code>init</code>, contains them. Without help, the system dies within two seconds of starting. <span class="tag v">verified in QEMU</span></p>
+    <p>Our fix lives in the kernel. When the fault happens, the kernel decodes the unknown instruction, computes what it would have done using instructions the CPU does have, writes the result back and lets the program continue. The program never notices. This is called <em>trap and emulate</em>. It works, but each trap costs thousands of times more than a normal instruction, so hot loops full of them are slow. That's where the shortcuts come in.</p>
+  </header>
+
+  <div class="panel lab">
+    <div class="lab-controls">
+      <div class="ctl">
+        <label for="prog">Program to run</label>
+        <select id="prog">
+          <option value="init">init: first program at boot</option>
+          <option value="apk">Verify an app package (SHA-256)</option>
+          <option value="zlib">Unzip data (zlib Adler-32)</option>
+          <option value="tls">Talk to a website (TLS, SHA-1/AES)</option>
+        </select>
+      </div>
+      <div class="ctl">
+        <span class="lbl">Kernel features</span>
+        <div class="toggles">
+          <label class="tog"><input type="checkbox" id="tEmu" checked> Trap-and-emulate (isa_emu)</label>
+          <label class="tog"><input type="checkbox" id="tSha"> SHA-256 / SHA-1 whole-function fast path</label>
+          <label class="tog"><input type="checkbox" id="tZlib"> Swap in a baseline zlib (from Cuttlefish)</label>
+        </div>
+      </div>
+    </div>
+    <div class="run-row">
+      <button class="btn" id="run">Run on Kaby Lake</button>
+      <button class="btn ghost" id="reset">Reset</button>
+      <span class="muted mono" id="labNote">Illustrative model. The real numbers are below the lab.</span>
+    </div>
+    <div class="lane-wrap"><div class="lane" id="lane" aria-label="Instruction stream"></div></div>
+    <div class="meters">
+      <div class="meter"><span class="k">Instructions</span><span class="v" id="mIns">0</span></div>
+      <div class="meter"><span class="k">Traps into kernel</span><span class="v" id="mTrap">0</span></div>
+      <div class="meter"><span class="k">Time (cost units)</span><span class="v" id="mCost">0</span></div>
+      <div class="meter"><span class="k">Native vs. trap time</span><div class="costbar" aria-hidden="true"><span id="cbN" style="background: var(--ok); width: 0"></span><span id="cbT" style="background: var(--accent); width: 0"></span></div></div>
+    </div>
+    <div class="verdict" id="verdict">Pick a program and press Run. Try turning the emulator off first.</div>
+  </div>
+
+  <div class="split">
+    <div class="panel card">
+      <h3>What the real numbers looked like</h3>
+      <p class="muted" style="font-size:.94rem">Counts from boots of the real image. <span class="tag v">verified</span></p>
+      <div class="items">
+        <div class="item"><span class="chip bad">before</span><div><div class="t">20.4 million traps in one boot</div><div class="d">99.4% of them were SHA-256: BoringSSL uses the SHA instructions without checking whether the CPU has them.</div></div></div>
+        <div class="item"><span class="chip ok">after</span><div><div class="t">108,000 traps, about 8× faster to each boot stage</div><div class="d">The SHA-256 fast path recognises the whole function by its bytes and runs a plain C version in one trap.</div></div></div>
+        <div class="item"><span class="chip ours">v9</span><div><div class="t">SHA-1 was 90% of 1.06 billion traps in a long session</div><div class="d">Same idea, second fast path.</div></div></div>
+        <div class="item"><span class="chip borrowed">v8</span><div><div class="t">zlib's checksum loop: about 300,000 traps per second</div><div class="d">Instead of emulating, we swapped in the same zlib built for older CPUs (from Google's open-source Cuttlefish build), after checking it exports the same functions.</div></div></div>
+      </div>
+    </div>
+    <div class="panel card">
+      <h3>How we know the emulator is correct</h3>
+      <p style="font-size:.95rem">An emulator that is subtly wrong corrupts data silently. So every emulated instruction was compared against a real CPU that has it: 225 million random test cases on the development PC (an i7-13700). Then the whole thing ran inside a virtual Kaby Lake-class CPU, booting Google's unmodified system with zero crashes from missing instructions. <span class="tag v">verified</span></p>
+      <p style="font-size:.95rem">Still open: wide AES (VAES) and carry-less multiply traps from HTTPS and the Tethering module, and GFNI, which now dominates the remaining count. These cost speed, not correctness.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ BOOT ============ -->
+<section class="chapter" id="boot">
+  <header>
+    <div class="eyebrow">Chapter 3</div>
+    <h2>Boot, stage by stage</h2>
+    <p class="muted">Pressing the power button sets off a relay race. Each stage loads the next. Every stage below broke at least once; the version tag says which image fixed it.</p>
+  </header>
+  <div class="boot">
+    <div class="rail" id="rail" role="group" aria-label="Boot stages"></div>
+    <div class="panel stage" id="stage" aria-live="polite"></div>
+    <div class="nav-row">
+      <button class="btn ghost" id="prevStage">Previous stage</button>
+      <button class="btn" id="nextStage">Next stage</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ AUDIO ============ -->
+<section class="chapter" id="audio">
+  <header>
+    <div class="eyebrow">Chapter 4</div>
+    <h2>Case file: the audio freeze</h2>
+    <p>Starting with v10, the laptop froze solid the moment Android opened the speaker. No error ever reached the log, because the log is written to the slow USB stick and the machine died first. Two tricks cracked it. First, Google's own <code>chromeos_pstore</code> driver keeps a copy of the kernel's messages in a reserved piece of RAM that survives a warm reboot. Second, a special boot entry made every freeze detector crash and reboot the machine instead of hanging. The next boot found the crash report waiting in RAM. <span class="tag v">verified</span></p>
+    <p>The report pointed at one function in Google's audio-chip driver, <code>avs_path_set_constraint</code>. Step through it below to see the bug.</p>
+  </header>
+  <div class="panel stepper">
+    <div class="run-row">
+      <div class="seg" role="group" aria-label="Driver version">
+        <button id="drvGoogle" aria-pressed="true">Google's driver</button>
+        <button id="drvFixed" aria-pressed="false">Our fixed driver</button>
+      </div>
+      <button class="btn" id="stepBtn">Step</button>
+      <button class="btn ghost" id="stepReset">Restart</button>
+    </div>
+    <div>
+      <div class="lbl mono muted" style="font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">Speaker path template (example shape) <span class="tag i">inferred</span></div>
+      <div class="modlist" id="mods"></div>
+    </div>
+    <div class="arrays" id="arrays"></div>
+    <div class="codebox" id="code"></div>
+    <div class="verdict" id="stepVerdict"></div>
+  </div>
+  <div class="split">
+    <div class="panel card">
+      <h3>Why a small bug froze everything</h3>
+      <p style="font-size:.95rem">Google compiled this driver with automatic bounds checks: writing past the end of an array triggers a deliberate crash instead of silent memory corruption. That crash happened inside the audio service's thread while it held the sound system's locks. Everything that wanted sound then waited forever, and the whole machine stopped responding.</p>
+    </div>
+    <div class="panel card">
+      <h3>How we replaced it safely</h3>
+      <p style="font-size:.95rem">Google ships this driver as a separate module, so we couldn't just edit the kernel. We rebuilt the module from the same source with a one-line-idea fix: size the arrays by modules, not by paths. Three checks prove it matches Google's: 268 identical symbol versions, the same options and the same function list. A startup rule swaps it in about 20 milliseconds before Android's driver loader starts.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CONTINUE ON ============ -->
+<section class="chapter" id="continue">
+  <header>
+    <div class="eyebrow">Chapter 5</div>
+    <h2>Why Continue On is blocked</h2>
+    <p>Continue On streams your phone's apps to the laptop over your local network. Before the phone agrees, it wants proof that the laptop is a genuine, untampered device. That proof is a chain of trust that starts in the factory. Switch between a real Googlebook and this Pixelbook to see where the chain breaks.</p>
+  </header>
+  <div class="run-row">
+    <div class="seg" role="group" aria-label="Which device">
+      <button id="devReal" aria-pressed="false">Real Googlebook</button>
+      <button id="devPb" aria-pressed="true">This Pixelbook</button>
+    </div>
+  </div>
+  <div class="chain" id="chain"></div>
+  <p class="muted" style="font-size:.95rem">Patching the laptop to believe it passed wouldn't help. The verdict is signed by Google's servers, and the <em>phone</em> checks it. GMS on the laptop has <code>validate_remote_device_integrity = true</code>, which means each side checks the other. Faking the signed verdict means faking factory keys, which is the route we decided not to take.</p>
+</section>
+
+<!-- ============ NEXT ============ -->
+<section class="chapter" id="next">
+  <header>
+    <div class="eyebrow">Chapter 6</div>
+    <h2>What's next, and what each choice costs</h2>
+    <p class="muted">You already decided that ChromeOS can be wiped for the internal install. These are the remaining choices.</p>
+  </header>
+  <div class="deck">
+    <div class="panel dec">
+      <span class="chip ours">next image</span>
+      <h3>Polish round (v13)</h3>
+      <ul>
+        <li>Audio on by default; test the headphone jack, mic and video volume</li>
+        <li>Remove the debug-only SELinux rules</li>
+        <li>Look at suspend: today a closed lid keeps the machine fully awake</li>
+      </ul>
+    </div>
+    <div class="panel dec">
+      <span class="chip ours">big step</span>
+      <h3>Install to the internal eMMC</h3>
+      <ul>
+        <li>Persistent data: the eMMC is far faster than the USB stick, so /data can live on disk</li>
+        <li>eMMC controller drivers must load during early boot</li>
+        <li>An updater that keeps your data, once we confirm encryption keys survive updates</li>
+        <li>Make a ChromeOS recovery USB first</li>
+      </ul>
+    </div>
+    <div class="panel dec">
+      <span class="chip google">your call</span>
+      <h3>Boot firmware</h3>
+      <ul>
+        <li><b>RW_LEGACY (now):</b> nothing to flash; CTRL+L at every boot; an accidental Space can trigger a wipe</li>
+        <li><b>Full UEFI ROM:</b> clean direct boot; needs write protection disabled; small brick risk, reversible with a backup</li>
+      </ul>
+    </div>
+    <div class="panel dec">
+      <span class="chip borrowed">sharing</span>
+      <h3>Public repo</h3>
+      <ul>
+        <li>Scripts and patches only; every user downloads Google's image and builds locally</li>
+        <li>Audio firmware from the user's own ChromeOS install or recovery image</li>
+        <li>Credit gbrunch (MIT) and gbos-x86-port; kernel patches stay GPL-2.0</li>
+        <li>Scrub device identifiers from evidence files</li>
+      </ul>
+    </div>
+    <div class="panel dec">
+      <span class="chip ok">ideas</span>
+      <h3>Ways to make it better</h3>
+      <ul>
+        <li>Fast paths for wide AES and GFNI hot spots (speed)</li>
+        <li>Send the audio-driver fix upstream to Linux</li>
+        <li>Suspend and resume, then battery life</li>
+        <li>Generalise to other Kaby/Amber Lake Chromebooks (Pixelbook Go)</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ GLOSSARY ============ -->
+<section class="chapter" id="glossary">
+  <header>
+    <div class="eyebrow">Reference</div>
+    <h2>Glossary</h2>
+  </header>
+  <div>
+    <details class="gl"><summary>Kernel</summary><p>The core program that owns the hardware: memory, CPU time, devices. Everything else asks it for things. Android's kernel is Linux. Google publishes the source, which is why we could rebuild it.</p></details>
+    <details class="gl"><summary>Driver / kernel module</summary><p>Code that teaches the kernel one piece of hardware. A module is a driver kept in a separate file and loaded on demand. Google ships hundreds; ours must match their "symbol versions" exactly, or the kernel refuses to load them.</p></details>
+    <details class="gl"><summary>Symbol versions (CRCs)</summary><p>Fingerprints of every function and data shape the kernel offers modules. If one changes, a module built for the old shape could corrupt memory, so the kernel refuses it. Our rebuilt kernel had 0 mismatches against Google's 643 modules.</p></details>
+    <details class="gl"><summary>Trap / #UD / invalid opcode</summary><p>The CPU's reaction to an instruction it doesn't know: it stops the program and hands control to the kernel. Normally the kernel kills the program (SIGILL). Ours emulates the instruction instead.</p></details>
+    <details class="gl"><summary>Fast path</summary><p>Instead of trapping on every SHA instruction inside a hash function, the kernel recognises the whole function by a fingerprint of its bytes on the first trap, runs an equivalent C version and jumps to the function's end.</p></details>
+    <details class="gl"><summary>init, ueventd, HAL</summary><p>init is Android's first program; it reads .rc scripts and starts everything else. ueventd watches for hardware and loads matching modules. A HAL (hardware abstraction layer) is a service that turns hardware into an Android API, like the audio HAL "dras" or the camera HAL.</p></details>
+    <details class="gl"><summary>SELinux policy</summary><p>Android's rulebook of which program may touch which file or device. Anything not explicitly allowed is denied. Several of our fixes were one-line additions to it.</p></details>
+    <details class="gl"><summary>GBRUNCH, GBVENDOR, GBLOG</summary><p>Partitions added by gbrunch, the project we build on. GBRUNCH (/oem) holds our startup scripts and overlay files; GBVENDOR is a copy of Google's vendor partition with policy changes; GBLOG stores logs you can copy off the stick. Google's own partitions stay byte-for-byte unchanged.</p></details>
+    <details class="gl"><summary>Bind mount</summary><p>Making one file appear in place of another without changing either. We use it to put our zlib, audio config and fixed audio driver over Google's read-only files.</p></details>
+    <details class="gl"><summary>Attestation / Play Integrity</summary><p>Cryptographic proof, rooted in keys burned in at the factory and registered with Google, that a device runs untampered software. Google's server refuses this device's keys ("Device not registered"), so features that require proof are unavailable.</p></details>
+    <details class="gl"><summary>ramoops / pstore</summary><p>A reserved area of RAM where the kernel keeps its recent messages. It survives a warm reboot, so after a crash the next boot can read what happened. It is how we caught the audio bug.</p></details>
+  </div>
+</section>
+
+<footer>
+  <div>Sources: the project's notes (<code>docs/PIXELBOOK-FEASIBILITY-NOTES.md</code>, sections 11 to 24), evidence files and device logs usb-dump6 to usb-dump12. Numbers tagged "verified" come from logs or measurements; "inferred" marks reasoning not yet confirmed on the device.</div>
+  <div>The trap lab is a simplified model: instruction mixes and costs are illustrative, chosen to show the effect of each feature, not measured timings.</div>
+</footer>
+</div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+
+  /* ---------------- chapter nav highlight ---------------- */
+  const tocLinks = [...document.querySelectorAll('.toc a')];
+  try {
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach((en) => { if (en.isIntersecting) { tocLinks.forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + en.target.id)); } });
+    }, { rootMargin: '-40% 0px -55% 0px' });
+    document.querySelectorAll('section.chapter').forEach((s) => obs.observe(s));
+  } catch (e) { /* nav still works as plain links */ }
+
+  /* ---------------- stack explorer ---------------- */
+  const LAYERS = [
+    { id: 'hw', name: 'Hardware', mix: [0, 0, 100], sub: 'The Pixelbook itself',
+      intro: 'The physical parts. Nothing here can change, so every other layer has to adapt to it.',
+      items: [
+        ['google', 'Kaby Lake CPU (i5-7Y57)', 'Lacks GFNI, AVX-VNNI, SHA-NI and wide VAES, all of which Google\'s build uses. Chapter 2 covers that.'],
+        ['google', 'Intel HD Graphics 615 (Gen9.5)', 'Google\'s kernel has no driver for this generation. Its newer "xe" driver doesn\'t list it.'],
+        ['google', 'Intel audio DSP + Maxim 98927 amps, Realtek 5663/5514 codecs', 'Driven by Intel\'s AVS driver, the same one ChromeOS uses on this board.'],
+        ['google', 'eMMC 116.5 GB, Wi-Fi/BT Intel 7265, USB webcam, Google touchpad, Chrome EC', 'Most already have drivers in Google\'s module set.']
+      ].map(([k, t, d]) => ({ k: k === 'google' ? 'hw' : k, t, d })) },
+    { id: 'fw', name: 'Firmware & bootloader', mix: [10, 30, 60], sub: 'What runs before the OS',
+      intro: 'Starts the hardware and finds something to boot.',
+      items: [
+        { k: 'borrowed', t: 'coreboot + MrChromebox RW_LEGACY (UEFI)', d: 'Lets the Pixelbook boot non-ChromeOS systems from the developer-mode screen with CTRL+L. Write protection stays on; nothing was flashed by us.' },
+        { k: 'ours', t: 'GRUB menu on the USB stick', d: 'Three entries: normal boot (audio off until v13), audio crash test (panic + reboot so the crash log survives), and a serial-console entry for QEMU tests.' }
+      ] },
+    { id: 'kernel', name: 'Kernel', mix: [80, 20, 0], sub: 'Linux 6.18, Google\'s source, rebuilt',
+      intro: 'We rebuilt Google\'s exact kernel source with the same configuration, so all of Google\'s 643 modules still load (0 symbol-version mismatches, verified). Then we added five things:',
+      items: [
+        { k: 'ours', t: 'isa_emu: trap-and-emulate for missing instructions', d: 'GFNI, AVX-VNNI, AVX-IFMA, VAES, VPCLMULQDQ, SHA-NI, plus SHA-256 and SHA-1 whole-function fast paths. 225 million differential tests passed.' },
+        { k: 'ours', t: 'i915 graphics driver as a module', d: 'Turned on in the configuration without changing anything Google\'s modules depend on. This gives the screen and Vulkan GPU rendering.' },
+        { k: 'ours', t: 'Touchpad: no hover reports', d: 'The Pixelbook pad reports a "hover" at the pad\'s centre before every touch; Android took it as a finger, so the pointer jumped. Removed one quirk flag.' },
+        { k: 'ours', t: 'Lower module-signature protection for prebuilt modules', d: 'Google\'s modules are signed with Google\'s key, which our kernel can\'t check. Without this, some couldn\'t use protected functions.' },
+        { k: 'ours', t: 'Audio driver bug fix (source)', d: 'The array overrun in Chapter 4. Lives in the kernel tree, but is built as a separate module.' },
+        { k: 'borrowed', t: 'C binder instead of Rust binder', d: 'Google\'s Rust binder module can\'t link to a rebuilt kernel. The C version does the same job.' }
+      ] },
+    { id: 'drv', name: 'Drivers & firmware files', mix: [70, 18, 12], sub: 'Modules and the blobs they load',
+      intro: 'Google\'s vendor partition already carries drivers for most of the Pixelbook\'s parts (keyboard, EC, touch, audio codecs, Wi-Fi). They load automatically when ueventd sees matching hardware.',
+      items: [
+        { k: 'google', t: '~480 Google modules (144 actually load here)', d: 'Loaded by hardware match. Modules with no hardware to match never load, which is how we found the next one.' },
+        { k: 'ours', t: 'system_heap.ko loaded at startup (v11)', d: 'Provides /dev/dma_heap, the memory pool for camera and video buffers. Nothing triggered it, so the camera got a black screen. Fixed with one line.' },
+        { k: 'ours', t: 'Rebuilt snd-soc-avs.ko (v12)', d: 'The fixed audio DSP driver, swapped in over Google\'s file before drivers load.' },
+        { k: 'ours', t: 'zram + zsmalloc loaded (v7)', d: 'Compressed swap in RAM. Google\'s memory daemon expects them; nothing loaded them.' },
+        { k: 'borrowed', t: 'Firmware: GPU (DMC/GuC/HuC), Wi-Fi 7265, Bluetooth, audio DSP', d: 'GPU, Wi-Fi and Bluetooth blobs from linux-firmware. Audio DSP firmware and topologies copied from your own ChromeOS install, never redistributed.' }
+      ] },
+    { id: 'android', name: 'Android base: init, SELinux, HALs', mix: [55, 30, 15], sub: 'Startup scripts, rules and hardware services',
+      intro: 'Google\'s system and vendor partitions stay byte-for-byte unchanged. gbrunch adds side partitions: our files live there and are layered on top at boot.',
+      items: [
+        { k: 'borrowed', t: 'gbrunch: GBRUNCH (/oem), GBVENDOR, GBLOG partitions', d: 'The foundation we built on: derived vendor partition, boot integration, persistent logger.' },
+        { k: 'borrowed', t: 'Software KeyMint and Gatekeeper (AOSP Cuttlefish)', d: 'Key storage normally handled by a security chip. Works, but has no Google-registered keys (Chapter 5).' },
+        { k: 'ours', t: 'Startup rules (init.gbrunch.rc additions)', d: 'Bind mounts (zlib, audio config, audio driver), load the DMA heap and zram, backlight permissions, keep-awake lock instead of broken suspend, stop a camera service crash loop.' },
+        { k: 'ours', t: 'SELinux rule additions', d: 'A few allow rules, each documented in policy/rules.txt; some diagnostics rules will be removed before release.' },
+        { k: 'ours', t: 'Hardware config files', d: 'Audio routing for the Pixelbook\'s cards, keyboard top-row map, touchpad tuning, brightness over the panel\'s DPCD channel.' },
+        { k: 'borrowed', t: 'Baseline zlib from Cuttlefish', d: 'Same library, built for older CPUs; avoids 300k traps per second.' }
+      ] },
+    { id: 'apps', name: 'Framework & apps', mix: [92, 8, 0], sub: 'Everything you actually see',
+      intro: 'Google\'s framework, Play services and apps run unmodified. The few changes are about storage.',
+      items: [
+        { k: 'google', t: 'System UI, launcher, Play Store, GMS, Camera, Settings', d: 'Unchanged. Their problems (Continue On, phone setup) come from layers below.' },
+        { k: 'ours', t: '/data in RAM (4 GiB)', d: 'The USB stick managed under one random 4 KiB write per second, so app data lives in memory. Nothing persists across reboots, which suits repeated setups with different accounts.' },
+        { k: 'ours', t: 'No 3.7 GB AI model copy on first boot', d: 'Google\'s first boot copies an AICore model into /data. It filled the disk and crash-looped the system, so we disabled the copy.' }
+      ] }
+  ];
+  const KIND = { google: ['google', 'Google'], ours: ['ours', 'Ours'], borrowed: ['borrowed', 'Borrowed'], hw: ['google', 'Hardware'] };
+  const layersEl = $('#layers'), detailEl = $('#layerDetail');
+  function showLayer(id) {
+    const L = LAYERS.find((x) => x.id === id);
+    [...layersEl.children].forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.id === id)));
+    detailEl.innerHTML = '';
+    detailEl.append(el('div', 'eyebrow', L.sub), el('h3', null, L.name), el('p', null, L.intro));
+    const box = el('div', 'items');
+    L.items.forEach((it) => {
+      const [cls, label] = KIND[it.k];
+      const row = el('div', 'item');
+      row.append(el('span', 'chip ' + cls, label), el('div', null, '<div class="t">' + it.t + '</div><div class="d">' + it.d + '</div>'));
+      box.append(row);
+    });
+    detailEl.append(box);
+  }
+  LAYERS.forEach((L) => {
+    const b = el('button', 'layer');
+    b.type = 'button'; b.dataset.id = L.id; b.setAttribute('aria-pressed', 'false');
+    b.innerHTML = '<span class="ln">' + L.name + '</span><span class="bar" aria-hidden="true">' +
+      '<span style="width:' + L.mix[0] + '%;background:var(--google)"></span>' +
+      '<span style="width:' + L.mix[1] + '%;background:var(--ours)"></span>' +
+      '<span style="width:' + L.mix[2] + '%;background:var(--borrowed)"></span></span>';
+    if (L.id === 'hw') b.querySelector('.bar').innerHTML = '<span style="width:100%;background:var(--google)"></span>';
+    b.addEventListener('click', () => showLayer(L.id));
+    layersEl.append(b);
+  });
+  showLayer('kernel');
+
+  /* ---------------- trap lab ---------------- */
+  // token kinds: n = native; g = GFNI; v = AVX-VNNI; s = SHA-256 block member; h = SHA-1 block member; a = wide AES
+  const OPN = { n: ['mov', 'add', 'vpaddd', 'cmp', 'jne', 'vmovdqu', 'lea', 'xor', 'call', 'pshufb', 'ret', 'sub'],
+    g: ['vgf2p8affineqb'], v: ['vpdpwssd'], s: ['sha256rnds2', 'sha256msg1', 'sha256msg2'], h: ['sha1rnds4', 'sha1msg1', 'sha1nexte'], a: ['vaesenc ymm'] };
+  function build(spec) { // spec: array of [kind, count] or ['S', blocks] for runs
+    const out = [];
+    spec.forEach(([k, c]) => {
+      if (k === 'S' || k === 'H') { for (let b = 0; b < c; b++) { for (let i = 0; i < 6; i++) out.push({ k: 'n' }); for (let i = 0; i < 10; i++) out.push({ k: k === 'S' ? 's' : 'h', blk: k + b }); } }
+      else for (let i = 0; i < c; i++) out.push({ k });
+    });
+    return out.map((t, i) => ({ ...t, op: OPN[t.k][i % OPN[t.k].length] }));
+  }
+  function interleave(a) { // light shuffle keeping SHA runs intact
+    const runs = []; let cur = [];
+    a.forEach((t) => { if (t.blk) { if (cur.length && cur[0].blk !== t.blk) { runs.push(cur); cur = []; } cur.push(t); } else { if (cur.length) { runs.push(cur); cur = []; } runs.push([t]); } });
+    if (cur.length) runs.push(cur);
+    let seed = 7; const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
+    for (let i = runs.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [runs[i], runs[j]] = [runs[j], runs[i]]; }
+    return runs.flat();
+  }
+  const PROGS = {
+    init: { name: 'init', pid1: true, spec: [['n', 34], ['g', 6], ['v', 3], ['S', 1]], note: 'init is process 1. If it dies, the kernel panics and the boot stops.' },
+    apk: { name: 'package verifier', spec: [['n', 16], ['S', 4]], note: 'Checking app signatures means hashing megabytes with SHA-256.' },
+    zlib: { name: 'zlib inflate', zlib: true, spec: [['n', 30], ['v', 16]], note: 'Adler-32 checksums run AVX-VNNI in a tight loop.' },
+    tls: { name: 'HTTPS client', spec: [['n', 20], ['H', 2], ['a', 6]], note: 'Web traffic hashes with SHA-1/SHA-256 and encrypts with wide AES, which has no fast path yet.' }
+  };
+  const lane = $('#lane'); let timer = null; let tokens = [];
+  const C_NATIVE = 1, C_TRAP = 40, C_FAST = 60; // illustrative units per token
+  function draw() {
+    lane.innerHTML = '';
+    tokens.forEach((t) => { const s = el('span', 'ins ' + (t.k === 'n' ? 'native' : 'trap'), t.op); t.node = s; lane.append(s); });
+  }
+  function resetLab() {
+    clearInterval(timer); timer = null;
+    const P = PROGS[$('#prog').value];
+    tokens = interleave(build(P.spec));
+    if (P.zlib && $('#tZlib').checked) tokens.forEach((t) => { if (t.k === 'v') { t.k = 'n'; t.op = 'vpmaddubsw'; } });
+    draw(); setMeters(0, 0, 0, 0, 0);
+    const v = $('#verdict'); v.className = 'verdict'; v.textContent = P.note + ' Press Run.';
+    $('#run').disabled = false;
+  }
+  function setMeters(ins, traps, cost, cn, ct) {
+    $('#mIns').textContent = ins; $('#mTrap').textContent = traps; $('#mCost').textContent = cost;
+    const tot = Math.max(cn + ct, 1); $('#cbN').style.width = (100 * cn / tot) + '%'; $('#cbT').style.width = (100 * ct / tot) + '%';
+  }
+  function runLab() {
+    resetLab(); $('#run').disabled = true;
+    const P = PROGS[$('#prog').value];
+    const emu = $('#tEmu').checked, fast = $('#tSha').checked;
+    let i = 0, ins = 0, traps = 0, cn = 0, ct = 0, ended = false; const fastDone = new Set();
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const step = () => {
+      if (i > 0 && tokens[i - 1]) tokens[i - 1].node.classList.remove('now');
+      if (i >= tokens.length) { finish(); return; }
+      const t = tokens[i]; t.node.classList.add('now');
+      const wrap = lane.parentElement; wrap.scrollLeft = Math.max(0, t.node.offsetLeft - wrap.clientWidth / 2);
+      if (t.k === 'n') { cn += C_NATIVE; ins++; t.node.classList.add('done'); }
+      else if (!emu) { t.node.classList.add('dead'); die(t); return; }
+      else if (fast && t.blk && (t.k === 's' || t.k === 'h')) {
+        if (fastDone.has(t.blk)) { t.node.classList.add('skip'); }
+        else { fastDone.add(t.blk); traps++; ct += C_FAST; ins++; t.node.classList.add('done'); t.node.title = 'one trap runs the whole function'; }
+      } else { traps++; ct += C_TRAP; ins++; t.node.classList.add('done'); }
+      setMeters(ins, traps, cn + ct, cn, ct); i++;
+    };
+    const die = (t) => {
+      ended = true; clearInterval(timer); timer = null; $('#run').disabled = false;
+      const v = $('#verdict'); v.className = 'verdict bad';
+      v.innerHTML = '<b>Invalid opcode: <code>' + t.op + '</code>.</b> The CPU doesn\'t know this instruction and nothing handles the trap, so the kernel sends SIGILL and ' + P.name + ' dies.' +
+        (P.pid1 ? ' Because init is process 1, the kernel panics: this is exactly how Google\'s image died on a Kaby Lake-class CPU before the emulator existed.' : '');
+    };
+    const finish = () => {
+      if (ended) return; ended = true; clearInterval(timer); timer = null; $('#run').disabled = false;
+      const v = $('#verdict'); const share = Math.round(100 * ct / Math.max(cn + ct, 1));
+      if (ct === 0) { v.className = 'verdict ok'; v.innerHTML = '<b>Finished with zero traps.</b> Every instruction was native, the best case.'; return; }
+      const slow = share >= 60;
+      v.className = 'verdict ' + (slow ? 'slow' : 'ok');
+      let msg = '<b>Finished.</b> ' + traps + ' trap' + (traps === 1 ? '' : 's') + ' took ' + share + '% of the time. ';
+      if (slow && !fast && /S|H/.test(JSON.stringify(P.spec))) msg += 'Most of it is spent in hash functions. Turn on the fast path and run again.';
+      else if (slow && P.zlib && !$('#tZlib').checked) msg += 'The checksum loop traps on every step. Swap in the baseline zlib and run again.';
+      else if (P.name === 'HTTPS client' && fast) msg += 'What remains is wide AES. A fast path for it is on the to-do list.';
+      else msg += 'That\'s the remaining real cost: correct, a little slower.';
+      v.innerHTML = msg;
+    };
+    if (reduce) { while (!ended) step(); return; }
+    timer = setInterval(step, 70);
+  }
+  $('#run').addEventListener('click', runLab);
+  $('#reset').addEventListener('click', resetLab);
+  ['#prog', '#tEmu', '#tSha', '#tZlib'].forEach((s) => $(s).addEventListener('change', resetLab));
+  resetLab();
+
+  /* ---------------- boot walk ---------------- */
+  const STAGES = [
+    { s: 'Power on', t: 'Firmware', what: 'coreboot starts the CPU and memory. Because the Pixelbook is in developer mode, it shows a warning screen; CTRL+L chooses MrChromebox\'s UEFI boot path.',
+      ours: 'Nothing flashed. The route was chosen to keep write protection on and stay reversible.',
+      bugs: [['early', 'Choosing the route: RW_LEGACY vs. full UEFI ROM vs. ChromeOS-style signed kernel. RW_LEGACY needed no flashing.']] },
+    { s: 'GRUB', t: 'Bootloader', what: 'GRUB on the USB stick\'s EFI partition loads the kernel and a small starter filesystem (initrd), along with a long command line of options.',
+      ours: 'Our menu, our kernel, our initrd. The command line selects the AVS audio driver, the panel\'s brightness channel and module blocklists.',
+      bugs: [['early', 'gbrunch\'s GRUB refused to boot on non-HP hardware: removed that check.'], ['v11', 'Added a crash-test entry: freezes become panics and reboots, so ramoops keeps the log.']] },
+    { s: 'Kernel', t: 'Linux starts', what: 'The kernel sets up memory and devices. i915 lights up the screen from the initrd. The trap-and-emulate handler is ready before any program runs.',
+      ours: 'Rebuilt kernel with isa_emu, i915, the touchpad fix and prebuilt-module support.',
+      bugs: [['early', 'No graphics driver for Gen9.5 at all: added i915 plus Kaby Lake GPU firmware.'], ['v8', 'Touchpad jumps: removed the hover quirk.']] },
+    { s: 'First-stage init', t: 'Mount the system', what: 'Android\'s init mounts Google\'s system, vendor and module partitions with integrity checking, then switches into the real system.',
+      ours: 'Unchanged except /data, which is a 4 GiB RAM disk.',
+      bugs: [['early', 'init itself contains GFNI: dead in 2 s without emulation.'], ['early', 'The USB stick does under 1 random write per second: /data moved to RAM.']] },
+    { s: 'Second-stage init', t: 'Rules and early setup', what: 'SELinux policy loads. init reads startup scripts. gbrunch\'s script runs first, then Google\'s.',
+      ours: 'Our early-init actions: bind-mount the fixed audio driver before drivers start loading, then zlib, DMA heap, zram, backlight permissions, the no-suspend lock.',
+      bugs: [['v8', 'zlib bind mount denied by SELinux: added one allow rule (built with libsepol 3.11; Ubuntu\'s 3.9 rejected the policy).'], ['v12', 'Audio driver swap: our mount runs at 3.983 s, ueventd starts at 4.001 s.']] },
+    { s: 'ueventd', t: 'Drivers load', what: 'ueventd walks the hardware list and loads each module whose alias matches. Then it loads the firmware blobs those drivers request.',
+      ours: 'Firmware placed where gbrunch\'s path override expects it (/oem/firmware).',
+      bugs: [['v7', 'Audio: the shipped kernel forced the legacy driver; snd_intel_dspcfg.dsp_driver=4 selects AVS.'], ['v11', 'system_heap.ko has no hardware alias, so it never loaded: camera buffers failed.']] },
+    { s: 'HAL services', t: 'Hardware services', what: 'Key storage (keystore + KeyMint), audio (dras), camera, graphics allocator and composer, Wi-Fi and Bluetooth services start.',
+      ours: 'Audio routing config, camera crash-loop stop, software KeyMint from gbrunch.',
+      bugs: [['v10', 'Audio config accepted for the first time: the machine froze on speaker open.'], ['v12', 'Root cause: the AVS array overrun. Fixed driver.']] },
+    { s: 'Framework', t: 'Android proper', what: 'zygote starts the Java world, system_server runs Android\'s managers, SurfaceFlinger draws using Vulkan on the HD 615.',
+      ours: 'Brightness wiring, keyboard map, zram for memory pressure.',
+      bugs: [['early', 'First boot filled /data with a 3.7 GB AI model and crash-looped: copy disabled.'], ['v10', 'Brightness flashed to full: two programs wrote the backlight; left it to one.']] },
+    { s: 'Setup', t: 'You sign in', what: 'The setup wizard, account sign-in, Play Store updates, then the desktop.',
+      ours: 'Nothing; this is all Google\'s.',
+      bugs: [['open', 'Phone-assisted setup: the Bluetooth controller can\'t advertise twice at once (inferred).'], ['open', 'Continue On: no registered attestation keys (Chapter 5).']] }
+  ];
+  let stageIx = 0; const rail = $('#rail');
+  STAGES.forEach((S, i) => { const b = el('button', 'stop', '<span>' + String(i + 1).padStart(2, '0') + '</span><b>' + S.s + '</b>'); b.type = 'button'; b.addEventListener('click', () => showStage(i)); rail.append(b); });
+  function showStage(i) {
+    stageIx = Math.max(0, Math.min(STAGES.length - 1, i)); const S = STAGES[stageIx];
+    [...rail.children].forEach((b, j) => b.setAttribute('aria-pressed', String(j === stageIx)));
+    const box = $('#stage'); box.innerHTML = '';
+    box.append(el('div', 'eyebrow', 'Stage ' + (stageIx + 1) + ' of ' + STAGES.length + ' · ' + S.t), el('h3', null, S.s));
+    const g = el('div', 'stage-grid');
+    g.append(el('div', null, '<h4>What happens</h4><p>' + S.what + '</p>'));
+    g.append(el('div', null, '<h4>What we do here</h4><p>' + S.ours + '</p>'));
+    const b = el('div', null, '<h4>What broke here</h4>');
+    S.bugs.forEach(([v, d]) => b.append(el('div', 'bug', '<span class="vv">' + (v === 'open' ? 'still open' : v === 'early' ? 'fixed in the first images' : 'fixed in ' + v) + '</span><span>' + d + '</span>'))); g.append(b);
+    box.append(g);
+    $('#prevStage').disabled = stageIx === 0; $('#nextStage').disabled = stageIx === STAGES.length - 1;
+  }
+  $('#prevStage').addEventListener('click', () => showStage(stageIx - 1));
+  $('#nextStage').addEventListener('click', () => showStage(stageIx + 1));
+  showStage(0);
+
+  /* ---------------- audio stepper ---------------- */
+  // Example template: 2 paths; path 1 has playback copier + feedback copier (I2S), path 2 has one I2S copier.
+  const MODS = [
+    { p: 1, n: 'copier: host DMA', cp: false }, { p: 1, n: 'gain', cp: false }, { p: 1, n: 'copier: I2S out', cp: true }, { p: 1, n: 'copier: I2S in (feedback)', cp: true },
+    { p: 2, n: 'copier: host DMA', cp: false }, { p: 2, n: 'copier: I2S out', cp: true }
+  ];
+  const PATHS = 2;
+  let fixed = false, pos = -1, idx = 0, crashed = false;
+  const CODE_G = ['n = number of paths;            // 2', 'rlist = kcalloc(n, 4 bytes);     // room for n entries', 'for each path, pipeline, module:', '    if module is not an I2S/DMIC copier: skip', '    rlist[i] = path.rate;         // bounds-checked write', '    i++;'];
+  const CODE_F = ['n = number of modules;          // 6  (pixelbook fix)', 'rlist = kcalloc(n, 4 bytes);     // room for every possible entry', 'for each path, pipeline, module:', '    if module is not an I2S/DMIC copier: skip', '    rlist[i] = path.rate;', '    i++;'];
+  function renderStep(hl) {
+    const mods = $('#mods'); mods.innerHTML = '';
+    MODS.forEach((m, j) => { const s = el('span', 'mod' + (m.cp ? ' cp' : '') + (j === pos ? ' cur' : '') + (j < pos ? ' seen' : ''), 'P' + m.p + ' · ' + m.n); mods.append(s); });
+    const size = fixed ? MODS.length : PATHS;
+    const arrays = $('#arrays'); arrays.innerHTML = '';
+    ['rlist', 'clist', 'slist'].forEach((name, r) => {
+      const row = el('div', 'arr'); row.append(el('span', 'nm', name));
+      const cells = el('div', 'cells');
+      const show = Math.max(size, idx + (crashed ? 1 : 0), 3);
+      for (let c = 0; c < show; c++) {
+        let cls = 'cell'; let txt = '';
+        if (c < size) cls += ' alloc'; else cls += ' over';
+        if (c < idx) { cls += ' full'; txt = ['48 kHz', '2 ch', '32 bit'][r]; }
+        if (crashed && c === idx && r === 0) { cls += ' boom'; txt = 'TRAP'; }
+        if (!txt) txt = c < size ? 'empty' : 'not ours';
+        const cell = el('span', cls, '<span class="ix">[' + c + ']</span>' + txt); cells.append(cell);
+      }
+      row.append(cells); arrays.append(row);
+    });
+    const code = (fixed ? CODE_F : CODE_G).map((l, j) => j === hl ? '<span class="hl">' + l.replace(/</g, '&lt;') + '</span>' : l.replace(/</g, '&lt;')).join('\n');
+    $('#code').innerHTML = code;
+  }
+  function stepReset() { pos = -1; idx = 0; crashed = false; $('#stepBtn').disabled = false; renderStep(1); const v = $('#stepVerdict'); v.className = 'verdict'; v.textContent = (fixed ? 'Fixed sizing: the arrays have one slot per module. ' : 'The arrays get one slot per path: ' + PATHS + ' paths, so 2 slots. ') + 'Press Step to walk through the modules.'; }
+  function step() {
+    if (crashed) return;
+    pos++;
+    const v = $('#stepVerdict');
+    if (pos >= MODS.length) { $('#stepBtn').disabled = true; v.className = 'verdict ok'; v.innerHTML = '<b>Done.</b> ' + idx + ' entries stored in ' + (fixed ? MODS.length : PATHS) + ' slots. The speaker opens and sound plays. This is v12.'; renderStep(-1); return; }
+    const m = MODS[pos];
+    if (!m.cp) { v.className = 'verdict'; v.textContent = 'Module "' + m.n + '" is not an I2S copier, so it is skipped.'; renderStep(3); return; }
+    const size = fixed ? MODS.length : PATHS;
+    if (idx >= size) { crashed = true; $('#stepBtn').disabled = true; renderStep(4); v.className = 'verdict bad'; v.innerHTML = '<b>Write to rlist[' + idx + '] but only ' + size + ' slots exist.</b> The compiler\'s bounds check fires a deliberate trap: <code>UBSAN … avs_path_set_constraint+0x36d</code>. The kernel kills the audio thread while it holds the sound system\'s locks, and the laptop freezes. This is exactly what the ramoops log from usb-dump11 recorded.'; return; }
+    idx++; v.className = 'verdict'; v.textContent = 'Copier "' + m.n + '" matches: store its format in slot ' + (idx - 1) + ' of ' + size + '.'; renderStep(4);
+  }
+  $('#stepBtn').addEventListener('click', step);
+  $('#stepReset').addEventListener('click', stepReset);
+  $('#drvGoogle').addEventListener('click', () => { fixed = false; $('#drvGoogle').setAttribute('aria-pressed', 'true'); $('#drvFixed').setAttribute('aria-pressed', 'false'); stepReset(); });
+  $('#drvFixed').addEventListener('click', () => { fixed = true; $('#drvFixed').setAttribute('aria-pressed', 'true'); $('#drvGoogle').setAttribute('aria-pressed', 'false'); stepReset(); });
+  stepReset();
+
+  /* ---------------- trust chain ---------------- */
+  const CHAIN = [
+    { t: 'Factory: a key is burned into the security chip', real: 'The laptop maker registers each device\'s public key with Google.', pb: 'Our key store is software (from AOSP Cuttlefish). Its key was never registered with anyone.', breakAt: true },
+    { t: 'Google issues attestation certificates', real: 'Google\'s provisioning server recognises the key and signs short-lived attestation keys.', pb: 'The server answers 444 "Device not registered". Logged on this Pixelbook. (verified)' },
+    { t: 'Play Integrity verdict', real: 'Apps and GMS get a Google-signed verdict: "meets device integrity".', pb: 'Key generation fails, so the verdict can\'t vouch for the hardware. (verified: "Integrity key attestation record generation failed")' },
+    { t: 'Devices link up', real: 'Laptop and phone enroll in your account and exchange integrity results over Nearby (BLE + Wi-Fi).', pb: 'Cross-device services are on, but zero devices get linked. (verified in GMS state)' },
+    { t: 'Continue On streams the app', real: 'The phone streams the app\'s window to the laptop over your local network.', pb: 'Never reached. (inferred: the phone rejects the link)' }
+  ];
+  let realDev = false;
+  function renderChain() {
+    const box = $('#chain'); box.innerHTML = ''; let broken = false;
+    CHAIN.forEach((c, i) => {
+      let state = 'ok';
+      if (!realDev) { if (c.breakAt) { state = 'broken'; broken = true; } else if (broken) state = 'after'; }
+      const row = el('div', 'link ' + (state === 'ok' ? '' : state));
+      row.append(el('span', 'dot', state === 'broken' ? '✕' : String(i + 1)));
+      row.append(el('div', null, '<div class="t" style="font-weight:600">' + c.t + '</div><div class="muted" style="font-size:.94rem">' + (realDev ? c.real : c.pb) + '</div>'));
+      box.append(row);
+    });
+  }
+  $('#devReal').addEventListener('click', () => { realDev = true; $('#devReal').setAttribute('aria-pressed', 'true'); $('#devPb').setAttribute('aria-pressed', 'false'); renderChain(); });
+  $('#devPb').addEventListener('click', () => { realDev = false; $('#devPb').setAttribute('aria-pressed', 'true'); $('#devReal').setAttribute('aria-pressed', 'false'); renderChain(); });
+  renderChain();
+})();
+</script>

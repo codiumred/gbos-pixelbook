@@ -1,0 +1,4 @@
+<AudioConfiguration>
+  <soundcard>avs_max98927</soundcard>
+  <audio-config-dir>avs_eve</audio-config-dir>
+</AudioConfiguration>

@@ -1,0 +1,44 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!--
+  Pixelbook (EVE) audio routing for Google's dras HAL. ChromeOS uses three AVS cards on this board; the PCM
+  numbers and jack name below are the ones from its UCM files (build/pixelbook/eve-chromeos/usr/share/alsa/ucm).
+  ALSA card ids drop the underscore of the card name (avs_max98927 -> avsmax98927).
+    avsmax98927  speaker amplifiers (2x MAX98927)  PCM 1
+    avsrt5663    headset codec RT5663              PCM 1 (playback and headset microphone)
+    avsrt5514    digital microphones RT5514        PCM 1 (capture)
+  Untested on hardware: whether the HAL accepts several cards in one HiFi section is exactly what the next
+  boot has to show.
+-->
+<audio_config>
+	<SoundCardName>hw:avsmax98927</SoundCardName>
+	<HiFi>
+		<Speaker>
+			<PlaybackPCM>hw:avsmax98927,1</PlaybackPCM>
+			<DSPLatency>0</DSPLatency>
+		</Speaker>
+		<Headphone>
+			<PlaybackPCM>hw:avsrt5663,1</PlaybackPCM>
+			<PlaybackMixerElem>DAC</PlaybackMixerElem>
+			<JackDev>avs_rt5663 Headset Jack</JackDev>
+			<JackSwitch>2</JackSwitch>
+			<DSPLatency>0</DSPLatency>
+		</Headphone>
+		<Mic>
+			<CapturePCM>hw:avsrt5663,1</CapturePCM>
+			<CaptureMixerElem>Headset Mic</CaptureMixerElem>
+			<JackDev>avs_rt5663 Headset Jack</JackDev>
+			<DSPLatency>0</DSPLatency>
+		</Mic>
+		<InternalMic>
+			<CapturePCM>hw:avsrt5514,1</CapturePCM>
+			<!-- required by dras (v9: "missing field `IntrinsicSensitivity`"); dBFS*100 at 94 dB SPL. -2600 is the value
+			     Google uses for the Lenovo's digital mics; this board's real figure is unknown. -->
+			<IntrinsicSensitivity>-2600</IntrinsicSensitivity>
+			<CaptureChannelMap>
+				<FL>2</FL>
+				<FR>3</FR>
+			</CaptureChannelMap>
+			<DSPLatency>0</DSPLatency>
+		</InternalMic>
+	</HiFi>
+</audio_config>

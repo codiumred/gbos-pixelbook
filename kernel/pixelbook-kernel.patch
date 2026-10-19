@@ -1,0 +1,1477 @@
+diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
+index 9073e1e60..3b9a099d0 100644
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -1761,6 +1761,17 @@ config X86_PAT
+ 
+ 	  If unsure, say Y.
+ 
++config X86_ISA_EMU
++	bool "Emulate GFNI/AVX-VNNI/VAES/VPCLMULQDQ/SHA-NI for user space"
++	depends on X86_64
++	default y
++	help
++	  Emulate, in the user-mode invalid-opcode handler, a small set of
++	  vector instructions that some prebuilt user space assumes without
++	  checking CPUID but that pre-Ice-Lake AVX2 CPUs do not implement.
++	  Each emulated instruction costs a trap, so this is a compatibility
++	  aid, not a performance feature. See arch/x86/kernel/isa_emu.c.
++
+ config X86_UMIP
+ 	def_bool y
+ 	prompt "User Mode Instruction Prevention" if EXPERT
+diff --git a/arch/x86/include/asm/traps.h b/arch/x86/include/asm/traps.h
+index 869b88061..ea1b0004e 100644
+--- a/arch/x86/include/asm/traps.h
++++ b/arch/x86/include/asm/traps.h
+@@ -57,4 +57,10 @@ static inline void cond_local_irq_disable(struct pt_regs *regs)
+ 		local_irq_disable();
+ }
+ 
++#ifdef CONFIG_X86_ISA_EMU
++bool isa_emu_fixup(struct pt_regs *regs);
++#else
++static inline bool isa_emu_fixup(struct pt_regs *regs) { return false; }
++#endif
++
+ #endif /* _ASM_X86_TRAPS_H */
+diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
+index bc184dd38..f1ea55ac2 100644
+--- a/arch/x86/kernel/Makefile
++++ b/arch/x86/kernel/Makefile
+@@ -143,6 +143,7 @@ obj-$(CONFIG_UPROBES)			+= uprobes.o
+ obj-$(CONFIG_PERF_EVENTS)		+= perf_regs.o
+ obj-$(CONFIG_SCHED_MC_PRIO)		+= itmt.o
+ obj-$(CONFIG_X86_UMIP)			+= umip.o
++obj-$(CONFIG_X86_ISA_EMU)		+= isa_emu.o
+ 
+ obj-$(CONFIG_UNWINDER_ORC)		+= unwind_orc.o
+ obj-$(CONFIG_UNWINDER_FRAME_POINTER)	+= unwind_frame.o
+diff --git a/arch/x86/kernel/isa_emu.c b/arch/x86/kernel/isa_emu.c
+new file mode 100755
+index 000000000..b9b3e3bd9
+--- /dev/null
++++ b/arch/x86/kernel/isa_emu.c
+@@ -0,0 +1,550 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * isa_emu.c - emulate ISA extensions that userspace assumes but this CPU lacks.
++ *
++ * Googlebook OS userland is compiled for a CPU baseline that includes GFNI,
++ * AVX-VNNI, AVX-IFMA, VAES, VPCLMULQDQ and SHA-NI, and uses them without checking
++ * CPUID. On older AVX2 CPUs (Skylake/Kaby Lake, Zen 2) those instructions raise #UD.
++ * This hooks the user-mode #UD path the same way UMIP emulation hooks #GP: decode
++ * the instruction, compute the result in software, write the destination vector
++ * register and skip the instruction.
++ *
++ * The decoder and arithmetic live in isa_emu_core.h, which is also compiled into a
++ * userspace differential tester that checks every form against real hardware.
++ *
++ * Boot parameters: isa_emu=off | on (default) | profile, isa_emu_fast=0 | 1 (default)
++ *   profile additionally records per-site hit counts (file + offset) and prints a
++ *   summary to the kernel log every 10 seconds.
++ *   isa_emu_fast=0 disables the whole-function fast paths (see isa_emu_fastpath.h).
++ */
++#define pr_fmt(fmt) "isa_emu: " fmt
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/uaccess.h>
++#include <linux/sched.h>
++#include <linux/sched/signal.h>
++#include <linux/ptrace.h>
++#include <linux/percpu.h>
++#include <linux/proc_fs.h>
++#include <linux/seq_file.h>
++#include <linux/mm.h>
++#include <linux/fs.h>
++#include <linux/hash.h>
++#include <linux/vmalloc.h>
++#include <linux/workqueue.h>
++#include <linux/spinlock.h>
++#include <linux/rcupdate.h>
++#include <linux/slab.h>
++
++#include <crypto/sha1.h>
++#include <crypto/sha2.h>
++
++#include <asm/cpufeature.h>
++#include <asm/fpu/api.h>
++#include <asm/fsgsbase.h>
++#include <asm/insn.h>
++#include <asm/insn-eval.h>
++#include <asm/traps.h>
++
++#include "isa_emu_core.h"
++#include "isa_emu_fastpath.h"
++
++static const char * const isa_op_name[ISA_OP_COUNT] = {
++	"none", "gf2p8affineqb", "gf2p8affineinvqb", "gf2p8mulb", "vpdpbusd", "vpdpbusds",
++	"vpdpwssd", "vpdpwssds", "vpmadd52luq", "vpmadd52huq", "aesenc", "aesenclast",
++	"aesdec", "aesdeclast", "pclmulqdq", "sha1rnds4", "sha1nexte", "sha1msg1",
++	"sha1msg2", "sha256rnds2", "sha256msg1", "sha256msg2",
++};
++
++static struct isa_tables isa_tables __ro_after_init;
++static bool isa_emu_ready __ro_after_init;
++static int isa_emu_mode __ro_after_init = 1;	/* 0 off, 1 on, 2 profile */
++static DEFINE_PER_CPU(u64 [ISA_OP_COUNT], isa_emu_count);
++static bool isa_emu_fast __ro_after_init = true;
++static DEFINE_PER_CPU(u64, isa_fast_sha256_calls);
++static DEFINE_PER_CPU(u64, isa_fast_sha256_blocks);
++static DEFINE_PER_CPU(u64, isa_fast_sha1_calls);
++static DEFINE_PER_CPU(u64, isa_fast_sha1_blocks);
++
++static int __init isa_emu_setup(char *s)
++{
++	if (!s)
++		return -EINVAL;
++	if (!strcmp(s, "off"))
++		isa_emu_mode = 0;
++	else if (!strcmp(s, "on"))
++		isa_emu_mode = 1;
++	else if (!strcmp(s, "profile"))
++		isa_emu_mode = 2;
++	else
++		return -EINVAL;
++	return 0;
++}
++early_param("isa_emu", isa_emu_setup);
++
++static int __init isa_emu_fast_setup(char *s)
++{
++	return s ? kstrtobool(s, &isa_emu_fast) : -EINVAL;
++}
++early_param("isa_emu_fast", isa_emu_fast_setup);
++
++/* ---- vector register access ---------------------------------------------------
++ * Callers hold fpregs_lock() with the task's FPU state loaded in the registers, so
++ * the registers are the authoritative copy of the user's state. Kernel C code is
++ * built without SSE/AVX and never touches them implicitly.
++ */
++struct isa_vec {
++	u8 b[32];
++};
++
++#define ISA_RD(n) case n: asm volatile("vmovdqu %%ymm" #n ", %0" : "=m" (*v)); break
++#define ISA_WR(n) case n: asm volatile("vmovdqu %0, %%ymm" #n : : "m" (*v)); break
++#define ISA_WRX(n) case n: asm volatile("movdqu %0, %%xmm" #n : : "m" (*v)); break
++#define ISA_ALL(M) M(0); M(1); M(2); M(3); M(4); M(5); M(6); M(7); \
++		   M(8); M(9); M(10); M(11); M(12); M(13); M(14); M(15)
++
++static noinline void isa_rd_ymm(unsigned int n, struct isa_vec *v)
++{
++	switch (n) {
++	ISA_ALL(ISA_RD);
++	}
++}
++
++/* VEX-encoded destination: bits above the vector length are zeroed */
++static noinline void isa_wr_ymm(unsigned int n, const struct isa_vec *v)
++{
++	switch (n) {
++	ISA_ALL(ISA_WR);
++	}
++}
++
++/* legacy SSE destination: only bits 127:0 change */
++static noinline void isa_wr_xmm(unsigned int n, const struct isa_vec *v)
++{
++	switch (n) {
++	ISA_ALL(ISA_WRX);
++	}
++}
++
++/* ---- optional per-site profile ---------------------------------------------------- */
++#define ISA_SITE_BITS 13
++#define ISA_SITES (1u << ISA_SITE_BITS)
++
++struct isa_site {
++	u64 key_ino;
++	u64 key_off;
++	u64 count;
++	u32 dev;
++	u8 op;
++	char name[35];
++};
++
++static struct isa_site *isa_sites;
++static DEFINE_RAW_SPINLOCK(isa_site_lock);
++static u64 isa_site_dropped;
++
++static void isa_emu_record(unsigned long ip, u8 op)
++{
++	struct mm_struct *mm = current->mm;
++	struct vm_area_struct *vma;
++	struct isa_site s = { .op = op, .key_off = ip };
++	unsigned long flags;
++	u32 h, i;
++
++	if (!isa_sites || !mm || !mmap_read_trylock(mm))
++		return;
++	vma = vma_lookup(mm, ip);
++	if (vma && vma->vm_file) {
++		struct inode *inode = file_inode(vma->vm_file);
++
++		s.key_ino = inode->i_ino;
++		s.dev = inode->i_sb->s_dev;
++		s.key_off = ip - vma->vm_start + ((u64)vma->vm_pgoff << PAGE_SHIFT);
++		rcu_read_lock();
++		strscpy(s.name, vma->vm_file->f_path.dentry->d_name.name, sizeof(s.name));
++		rcu_read_unlock();
++	} else {
++		strscpy(s.name, "[anon]", sizeof(s.name));
++	}
++	mmap_read_unlock(mm);
++
++	h = hash_64(s.key_ino * 0x9E3779B97F4A7C15ULL ^ s.key_off ^ ((u64)s.dev << 40), ISA_SITE_BITS);
++	raw_spin_lock_irqsave(&isa_site_lock, flags);
++	for (i = 0; i < 32; i++) {
++		struct isa_site *e = &isa_sites[(h + i) & (ISA_SITES - 1)];
++
++		if (!e->count) {
++			*e = s;
++			e->count = 1;
++			goto unlock;
++		}
++		if (e->key_ino == s.key_ino && e->key_off == s.key_off && e->dev == s.dev) {
++			e->count++;
++			goto unlock;
++		}
++	}
++	isa_site_dropped++;
++unlock:
++	raw_spin_unlock_irqrestore(&isa_site_lock, flags);
++}
++
++static u64 isa_emu_sum(int op)
++{
++	u64 sum = 0;
++	int cpu;
++
++	for_each_possible_cpu(cpu)
++		sum += per_cpu(isa_emu_count, cpu)[op];
++	return sum;
++}
++
++static u64 isa_percpu_sum(u64 __percpu *var)
++{
++	u64 sum = 0;
++	int cpu;
++
++	for_each_possible_cpu(cpu)
++		sum += *per_cpu_ptr(var, cpu);
++	return sum;
++}
++
++#define ISA_TOP 12
++static void isa_emu_report(struct work_struct *work);
++static DECLARE_DELAYED_WORK(isa_emu_report_work, isa_emu_report);
++
++static void isa_emu_report(struct work_struct *work)
++{
++	static u64 last_total;
++	u64 total = 0, top_count[ISA_TOP] = { 0 };
++	u32 top_idx[ISA_TOP] = { 0 };
++	char line[400];
++	int op, n = 0, i, j;
++	u32 k;
++
++	for (op = 1; op < ISA_OP_COUNT; op++) {
++		u64 c = isa_emu_sum(op);
++
++		total += c;
++		if (c)
++			n += scnprintf(line + n, sizeof(line) - n, " %s=%llu", isa_op_name[op], c);
++	}
++	if (total != last_total) {
++		pr_info("total=%llu (+%llu/10s) fast_sha256=%llu calls/%llu blocks fast_sha1=%llu calls/%llu blocks%s\n",
++			total, total - last_total, isa_percpu_sum(&isa_fast_sha256_calls),
++			isa_percpu_sum(&isa_fast_sha256_blocks), isa_percpu_sum(&isa_fast_sha1_calls),
++			isa_percpu_sum(&isa_fast_sha1_blocks), line);
++		for (k = 0; k < ISA_SITES; k++) {
++			u64 c = READ_ONCE(isa_sites[k].count);
++
++			for (i = 0; i < ISA_TOP; i++) {
++				if (c <= top_count[i])
++					continue;
++				for (j = ISA_TOP - 1; j > i; j--) {
++					top_count[j] = top_count[j - 1];
++					top_idx[j] = top_idx[j - 1];
++				}
++				top_count[i] = c;
++				top_idx[i] = k;
++				break;
++			}
++		}
++		for (i = 0; i < ISA_TOP && top_count[i]; i++) {
++			struct isa_site *e = &isa_sites[top_idx[i]];
++
++			pr_info("  site %llu %s %s+0x%llx\n", top_count[i], isa_op_name[e->op],
++				e->name, e->key_off);
++		}
++		if (isa_site_dropped)
++			pr_info("  site table full: %llu hits unattributed\n", isa_site_dropped);
++		last_total = total;
++	}
++	schedule_delayed_work(&isa_emu_report_work, 10 * HZ);
++}
++
++/* ---- whole-function fast paths --------------------------------------------------------- */
++
++#define ISA_FAST_MAX_BLOCKS (1ULL << 26)	/* 4 GiB of message per call */
++
++/*
++ * The trap is the first SHA256RNDS2 of BoringSSL's sha256_block_data_order_hw (verified by
++ * hashing the function's bytes): rdi = state, rsi = current block, rdx = blocks left, and the
++ * working state is in xmm1/xmm2. Hash all remaining blocks with the kernel's SHA-256, store the
++ * state as the function's tail would, and resume at its `ret`. Vector registers, rsi and rdx
++ * are caller-saved scratch for this function. Returns false, having changed nothing, if the
++ * code does not match or user memory is not accessible; the caller then emulates normally.
++ */
++static noinline bool isa_fast_sha256(struct pt_regs *regs, const struct isa_fastpath *e)
++{
++	unsigned long start = regs->ip - e->trap_off, data = regs->si;
++	u64 blocks = regs->dx, left;
++	struct sha256_ctx ctx = {};
++	struct isa_vec x1, x2;
++	bool ok = false;
++	u8 out[32];
++	u8 *page;
++	int i;
++
++	if (!blocks || blocks > ISA_FAST_MAX_BLOCKS)
++		return false;
++	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
++	if (!page)
++		return false;
++	if (copy_from_user(page, (void __user *)start, e->len) || isa_fp_hash(page, e) != e->hash)
++		goto out;
++
++	fpregs_lock();
++	if (test_thread_flag(TIF_NEED_FPU_LOAD))
++		switch_fpu_return();
++	isa_rd_ymm(1, &x1);
++	isa_rd_ymm(2, &x2);
++	fpregs_unlock();
++	isa_fp_sha256_state(ctx.ctx.state.h, x1.b, x2.b);
++
++	for (left = blocks * SHA256_BLOCK_SIZE; left; ) {
++		size_t n = min_t(u64, left, PAGE_SIZE);
++
++		if (copy_from_user(page, (void __user *)data, n))
++			goto out;
++		sha256_update(&ctx, page, n);
++		data += n;
++		left -= n;
++		cond_resched();
++	}
++	for (i = 0; i < 8; i++)
++		isa_wr32(out + 4 * i, ctx.ctx.state.h[i]);
++	if (copy_to_user((void __user *)regs->di, out, sizeof(out)))
++		goto out;
++
++	regs->si = data;
++	regs->dx = 0;
++	regs->ip = start + e->ret_off;
++	this_cpu_inc(isa_fast_sha256_calls);
++	this_cpu_add(isa_fast_sha256_blocks, blocks);
++	ok = true;
++out:
++	kfree(page);
++	return ok;
++}
++
++/*
++ * The trap is the first SHA1MSG1 of an iteration of BoringSSL's SHA-NI SHA-1 loop (verified by hashing the
++ * function's bytes; gen_fastpath.py checked its loop head and tail): rdi = state, rdx = blocks left after the
++ * current one, rsi = next block (or the current one if it is the last), xmm0 = A..D and xmm9 = E as of the
++ * start of the current block. The state in memory is only written by the function's tail, so it may be stale;
++ * the registers are authoritative at every iteration. Hash the current and all remaining blocks with the
++ * kernel's SHA-1, store the state as the tail would and resume at `ret`. Same failure rule as SHA-256: on any
++ * mismatch or fault nothing has been modified and normal emulation continues.
++ */
++static noinline bool isa_fast_sha1(struct pt_regs *regs, const struct isa_fastpath *e)
++{
++	unsigned long start = regs->ip - e->trap_off;
++	struct sha1_ctx ctx = {};
++	struct isa_vec x0, x9;
++	u64 data, blocks, left;
++	bool ok = false;
++	u8 out[20];
++	u8 *page;
++	int i;
++
++	if (regs->dx >= ISA_FAST_MAX_BLOCKS)
++		return false;
++	isa_fp_sha1_args(regs->si, regs->dx, &data, &blocks);
++	page = kmalloc(PAGE_SIZE, GFP_KERNEL);
++	if (!page)
++		return false;
++	if (copy_from_user(page, (void __user *)start, e->len) || isa_fp_hash(page, e) != e->hash)
++		goto out;
++
++	fpregs_lock();
++	if (test_thread_flag(TIF_NEED_FPU_LOAD))
++		switch_fpu_return();
++	isa_rd_ymm(0, &x0);
++	isa_rd_ymm(9, &x9);
++	fpregs_unlock();
++	isa_fp_sha1_state(ctx.state.h, x0.b, x9.b);
++
++	for (left = blocks * SHA1_BLOCK_SIZE; left; ) {
++		size_t n = min_t(u64, left, PAGE_SIZE);
++
++		if (copy_from_user(page, (void __user *)data, n))
++			goto out;
++		sha1_update(&ctx, page, n);
++		data += n;
++		left -= n;
++		cond_resched();
++	}
++	for (i = 0; i < 5; i++)
++		isa_wr32(out + 4 * i, ctx.state.h[i]);
++	if (copy_to_user((void __user *)regs->di, out, sizeof(out)))
++		goto out;
++
++	regs->si = data;
++	regs->dx = 0;
++	regs->ip = start + e->ret_off;
++	this_cpu_inc(isa_fast_sha1_calls);
++	this_cpu_add(isa_fast_sha1_blocks, blocks);
++	ok = true;
++out:
++	kfree(page);
++	return ok;
++}
++
++static bool isa_emu_fastpath(struct pt_regs *regs, const struct isa_insn *in,
++			     const unsigned char *buf, int nr)
++{
++	int i;
++
++	if (in->op == ISA_SHA256RNDS2 && !in->is_mem && in->reg == 2 && in->rm == 1) {
++		for (i = isa_fp_next(buf, nr, ISA_FP_SHA256_BLOCKS, 0); i >= 0;
++		     i = isa_fp_next(buf, nr, ISA_FP_SHA256_BLOCKS, i + 1))
++			if (isa_fast_sha256(regs, &isa_fastpaths[i]))
++				return true;
++	}
++	if (in->op == ISA_SHA1MSG1 && !in->is_mem && in->reg == 4 && in->rm == 5) {
++		for (i = isa_fp_next(buf, nr, ISA_FP_SHA1_BLOCKS, 0); i >= 0;
++		     i = isa_fp_next(buf, nr, ISA_FP_SHA1_BLOCKS, i + 1))
++			if (isa_fast_sha1(regs, &isa_fastpaths[i]))
++				return true;
++	}
++	return false;
++}
++
++/* ---- the #UD hook -------------------------------------------------------------------- */
++
++/*
++ * Called from exc_invalid_op() for a #UD taken in user mode, with interrupts off.
++ * Returns true if the instruction was emulated (or a fault on its memory operand was
++ * turned into a signal) and the trap is fully handled.
++ */
++bool isa_emu_fixup(struct pt_regs *regs)
++{
++	unsigned char buf[MAX_INSN_SIZE];
++	struct isa_vec src1, src2, dst, x0;
++	struct isa_insn in;
++	bool handled = false;
++	int nr, len;
++
++	if (!isa_emu_ready || !user_64bit_mode(regs))
++		return false;
++
++	if (regs->flags & X86_EFLAGS_IF)
++		local_irq_enable();
++
++	nr = insn_fetch_from_user(regs, buf);
++	if (nr <= 0)
++		goto out;
++	len = isa_emu_decode(buf, nr, &in);
++	if (len < 0)
++		goto out;
++	if (isa_emu_fast && isa_emu_fastpath(regs, &in, buf, nr)) {
++		handled = true;
++		goto out;
++	}
++
++	memset(&src2, 0, sizeof(src2));
++	memset(&x0, 0, sizeof(x0));
++	if (in.is_mem) {
++		u64 gpr[16] = {
++			regs->ax, regs->cx, regs->dx, regs->bx, regs->sp, regs->bp, regs->si, regs->di,
++			regs->r8, regs->r9, regs->r10, regs->r11, regs->r12, regs->r13, regs->r14, regs->r15,
++		};
++		u64 segbase = 0, ea;
++
++		if (in.seg == ISA_SEG_FS)
++			segbase = x86_fsbase_read_task(current);
++		else if (in.seg == ISA_SEG_GS)
++			segbase = x86_gsbase_read_task(current);
++		ea = isa_emu_ea(&in, gpr, regs->ip, segbase);
++		if (copy_from_user(src2.b, (void __user *)ea, in.vl)) {
++			/* what the real instruction would have done */
++			force_sig_fault(SIGSEGV, SEGV_MAPERR, (void __user *)ea);
++			handled = true;
++			goto out;
++		}
++	}
++
++	fpregs_lock();
++	if (test_thread_flag(TIF_NEED_FPU_LOAD))
++		switch_fpu_return();
++	if (!in.is_mem)
++		isa_rd_ymm(in.rm, &src2);
++	isa_rd_ymm(in.vvvv, &src1);
++	isa_rd_ymm(in.reg, &dst);
++	if (in.op == ISA_SHA256RNDS2)
++		isa_rd_ymm(0, &x0);
++	isa_emu_compute(&isa_tables, &in, dst.b, src1.b, src2.b, x0.b);
++	if (in.legacy)
++		isa_wr_xmm(in.reg, &dst);
++	else
++		isa_wr_ymm(in.reg, &dst);
++	fpregs_unlock();
++
++	regs->ip += len;
++	this_cpu_inc(isa_emu_count[in.op]);
++	if (isa_emu_mode == 2)
++		isa_emu_record(regs->ip - len, in.op);
++	handled = true;
++out:
++	if (regs->flags & X86_EFLAGS_IF)
++		local_irq_disable();
++	return handled;
++}
++
++static int isa_emu_show(struct seq_file *m, void *v)
++{
++	int op;
++
++	seq_printf(m, "mode %s\n", isa_emu_mode == 2 ? "profile" : isa_emu_ready ? "on" : "off");
++	for (op = 1; op < ISA_OP_COUNT; op++)
++		seq_printf(m, "%-18s %llu\n", isa_op_name[op], isa_emu_sum(op));
++	seq_printf(m, "fastpath %s\n", isa_emu_fast ? "on" : "off");
++	seq_printf(m, "fast_sha256_calls  %llu\n", isa_percpu_sum(&isa_fast_sha256_calls));
++	seq_printf(m, "fast_sha256_blocks %llu\n", isa_percpu_sum(&isa_fast_sha256_blocks));
++	seq_printf(m, "fast_sha1_calls  %llu\n", isa_percpu_sum(&isa_fast_sha1_calls));
++	seq_printf(m, "fast_sha1_blocks %llu\n", isa_percpu_sum(&isa_fast_sha1_blocks));
++	return 0;
++}
++
++static int isa_emu_sites_show(struct seq_file *m, void *v)
++{
++	u32 k;
++
++	if (!isa_sites)
++		return 0;
++	for (k = 0; k < ISA_SITES; k++) {
++		struct isa_site *e = &isa_sites[k];
++
++		if (e->count)
++			seq_printf(m, "%llu %s %x:%llu 0x%llx %s\n", e->count, isa_op_name[e->op],
++				   e->dev, e->key_ino, e->key_off, e->name);
++	}
++	return 0;
++}
++
++static int __init isa_emu_init(void)
++{
++	if (!isa_emu_mode)
++		return 0;
++	/* The emulator reads and writes YMM state directly. */
++	if (!boot_cpu_has(X86_FEATURE_AVX2) || !boot_cpu_has(X86_FEATURE_OSXSAVE)) {
++		pr_info("disabled: CPU has no AVX2\n");
++		return 0;
++	}
++	isa_emu_init_tables(&isa_tables);
++	if (isa_emu_mode == 2) {
++		isa_sites = vzalloc(array_size(ISA_SITES, sizeof(*isa_sites)));
++		if (isa_sites)
++			schedule_delayed_work(&isa_emu_report_work, 10 * HZ);
++	}
++	proc_create_single("isa_emu", 0444, NULL, isa_emu_show);
++	proc_create_single("isa_emu_sites", 0444, NULL, isa_emu_sites_show);
++	isa_emu_ready = true;
++	pr_info("user-mode emulation enabled%s (gfni=%d avx_vnni=%d vaes=%d vpclmulqdq=%d sha_ni=%d native)\n",
++		isa_emu_mode == 2 ? " with site profiling" : "",
++		boot_cpu_has(X86_FEATURE_GFNI), boot_cpu_has(X86_FEATURE_AVX_VNNI),
++		boot_cpu_has(X86_FEATURE_VAES), boot_cpu_has(X86_FEATURE_VPCLMULQDQ),
++		boot_cpu_has(X86_FEATURE_SHA_NI));
++	return 0;
++}
++arch_initcall(isa_emu_init);
+diff --git a/arch/x86/kernel/isa_emu_core.h b/arch/x86/kernel/isa_emu_core.h
+new file mode 100755
+index 000000000..2623305e9
+--- /dev/null
++++ b/arch/x86/kernel/isa_emu_core.h
+@@ -0,0 +1,644 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * isa_emu_core.h - decode and compute x86-64 instructions that Googlebook OS userland
++ * uses unconditionally but pre-Ice-Lake Intel CPUs (Kaby Lake: Pixelbook 2017) lack.
++ *
++ * Pure, freestanding C: no kernel or libc dependencies beyond memcpy/memset, so the
++ * exact same code is built into the kernel #UD handler (arch/x86/kernel/isa_emu.c)
++ * and into the userspace differential tester (test/difftest.c), which checks every
++ * instruction form against native execution on a CPU that has them.
++ *
++ * Covered (64-bit mode only):
++ *   GFNI        (V)GF2P8AFFINEQB, (V)GF2P8AFFINEINVQB, (V)GF2P8MULB   legacy + VEX.128/256
++ *   AVX-VNNI    VPDPBUSD(S), VPDPWSSD(S)                              VEX.128/256
++ *   AVX-IFMA    VPMADD52LUQ, VPMADD52HUQ                              VEX.128/256
++ *   VAES        VAESENC, VAESENCLAST, VAESDEC, VAESDECLAST            VEX.128/256
++ *   VPCLMULQDQ  VPCLMULQDQ                                            VEX.128/256
++ *   SHA-NI      SHA1RNDS4, SHA1NEXTE, SHA1MSG1, SHA1MSG2,
++ *               SHA256RNDS2, SHA256MSG1, SHA256MSG2                   legacy
++ * Not covered: EVEX encodings (AVX-512 state), AVX-VNNI-INT8/INT16, AMX.
++ */
++#ifndef ISA_EMU_CORE_H
++#define ISA_EMU_CORE_H
++
++#ifdef __KERNEL__
++#include <linux/types.h>
++#include <linux/string.h>
++#else
++#include <stdint.h>
++#include <string.h>
++typedef uint8_t u8;
++typedef uint16_t u16;
++typedef uint32_t u32;
++typedef uint64_t u64;
++typedef int8_t s8;
++typedef int16_t s16;
++typedef int32_t s32;
++typedef int64_t s64;
++#endif
++
++enum isa_op {
++	ISA_OP_NONE = 0,
++	ISA_GF2P8AFFINEQB,
++	ISA_GF2P8AFFINEINVQB,
++	ISA_GF2P8MULB,
++	ISA_VPDPBUSD,
++	ISA_VPDPBUSDS,
++	ISA_VPDPWSSD,
++	ISA_VPDPWSSDS,
++	ISA_VPMADD52LUQ,
++	ISA_VPMADD52HUQ,
++	ISA_AESENC,
++	ISA_AESENCLAST,
++	ISA_AESDEC,
++	ISA_AESDECLAST,
++	ISA_PCLMULQDQ,
++	ISA_SHA1RNDS4,
++	ISA_SHA1NEXTE,
++	ISA_SHA1MSG1,
++	ISA_SHA1MSG2,
++	ISA_SHA256RNDS2,
++	ISA_SHA256MSG1,
++	ISA_SHA256MSG2,
++	ISA_OP_COUNT
++};
++
++#define ISA_SEG_NONE 0
++#define ISA_SEG_FS   1
++#define ISA_SEG_GS   2
++
++#define ISA_DEC_NOT_OURS  (-1)	/* not an instruction this emulator handles */
++#define ISA_DEC_TRUNCATED (-2)	/* ran out of bytes; caller may retry with more */
++
++struct isa_insn {
++	u8 op;		/* enum isa_op */
++	u8 len;		/* total instruction length in bytes */
++	u8 vl;		/* vector length in bytes: 16 or 32 */
++	u8 legacy;	/* legacy SSE encoding: dest is also src1, bits 255:128 preserved */
++	u8 reg;		/* ModRM.reg (+R): destination register */
++	u8 vvvv;	/* VEX.vvvv: first source register (VEX only) */
++	u8 rm;		/* ModRM.rm (+B): second source register when !is_mem */
++	u8 is_mem;	/* second source is a memory operand */
++	u8 imm;		/* imm8 (0 if none) */
++	u8 seg;		/* ISA_SEG_* override */
++	u8 addr32;	/* 0x67 address-size prefix */
++	u8 has_base, has_index, rip_rel;
++	u8 base, index, scale;
++	s32 disp;
++};
++
++/* ---- little-endian unaligned accessors ------------------------------------ */
++static inline u16 isa_rd16(const u8 *p) { u16 v; memcpy(&v, p, 2); return v; }
++static inline u32 isa_rd32(const u8 *p) { u32 v; memcpy(&v, p, 4); return v; }
++static inline u64 isa_rd64(const u8 *p) { u64 v; memcpy(&v, p, 8); return v; }
++static inline void isa_wr32(u8 *p, u32 v) { memcpy(p, &v, 4); }
++static inline void isa_wr64(u8 *p, u64 v) { memcpy(p, &v, 8); }
++
++/* ---- decoder ---------------------------------------------------------------- */
++
++struct isa_optab {
++	u8 map;		/* 2 = 0F38, 3 = 0F3A */
++	u8 pp;		/* 0 = none, 1 = 66 */
++	u8 opcode;
++	u8 op;
++	u8 w;		/* VEX.W requirement: 0, 1, or 2 = ignored */
++	u8 has_imm;
++	u8 vex;		/* 1 = VEX form exists */
++	u8 legacy;	/* 1 = legacy SSE form exists */
++};
++
++static const struct isa_optab isa_optab[] = {
++	{ 3, 1, 0xCE, ISA_GF2P8AFFINEQB,    1, 1, 1, 1 },
++	{ 3, 1, 0xCF, ISA_GF2P8AFFINEINVQB, 1, 1, 1, 1 },
++	{ 2, 1, 0xCF, ISA_GF2P8MULB,        0, 0, 1, 1 },
++	{ 2, 1, 0x50, ISA_VPDPBUSD,         0, 0, 1, 0 },
++	{ 2, 1, 0x51, ISA_VPDPBUSDS,        0, 0, 1, 0 },
++	{ 2, 1, 0x52, ISA_VPDPWSSD,         0, 0, 1, 0 },
++	{ 2, 1, 0x53, ISA_VPDPWSSDS,        0, 0, 1, 0 },
++	{ 2, 1, 0xB4, ISA_VPMADD52LUQ,      1, 0, 1, 0 },
++	{ 2, 1, 0xB5, ISA_VPMADD52HUQ,      1, 0, 1, 0 },
++	{ 2, 1, 0xDC, ISA_AESENC,           2, 0, 1, 0 },
++	{ 2, 1, 0xDD, ISA_AESENCLAST,       2, 0, 1, 0 },
++	{ 2, 1, 0xDE, ISA_AESDEC,           2, 0, 1, 0 },
++	{ 2, 1, 0xDF, ISA_AESDECLAST,       2, 0, 1, 0 },
++	{ 3, 1, 0x44, ISA_PCLMULQDQ,        2, 1, 1, 0 },
++	{ 3, 0, 0xCC, ISA_SHA1RNDS4,        0, 1, 0, 1 },
++	{ 2, 0, 0xC8, ISA_SHA1NEXTE,        0, 0, 0, 1 },
++	{ 2, 0, 0xC9, ISA_SHA1MSG1,         0, 0, 0, 1 },
++	{ 2, 0, 0xCA, ISA_SHA1MSG2,         0, 0, 0, 1 },
++	{ 2, 0, 0xCB, ISA_SHA256RNDS2,      0, 0, 0, 1 },
++	{ 2, 0, 0xCC, ISA_SHA256MSG1,       0, 0, 0, 1 },
++	{ 2, 0, 0xCD, ISA_SHA256MSG2,       0, 0, 0, 1 },
++};
++
++/*
++ * Decode one instruction from b[0..n). Returns its length (> 0) and fills *in,
++ * or ISA_DEC_NOT_OURS / ISA_DEC_TRUNCATED.
++ */
++static inline int isa_emu_decode(const u8 *b, int n, struct isa_insn *in)
++{
++	const struct isa_optab *t = NULL;
++	int p = 0, i;
++	u8 osz = 0, rep = 0, seg = ISA_SEG_NONE, addr32 = 0;
++	u8 R = 0, X = 0, B = 0, W = 0, L = 0, pp = 0, map = 0, vvvv = 0, vex = 0;
++	u8 opcode, modrm, mod, rmf;
++
++#define ISA_NEED(k) do { if (p + (k) > n) return ISA_DEC_TRUNCATED; } while (0)
++
++	memset(in, 0, sizeof(*in));
++	if (n > 15)
++		n = 15;
++
++	/* legacy prefixes */
++	for (;;) {
++		ISA_NEED(1);
++		switch (b[p]) {
++		case 0x26: case 0x2E: case 0x36: case 0x3E:	/* ES/CS/SS/DS: ignored in 64-bit mode */
++			p++; continue;
++		case 0x64: seg = ISA_SEG_FS; p++; continue;
++		case 0x65: seg = ISA_SEG_GS; p++; continue;
++		case 0x66: osz = 1; p++; continue;
++		case 0x67: addr32 = 1; p++; continue;
++		case 0xF2: case 0xF3: rep = b[p]; p++; continue;
++		case 0xF0: return ISA_DEC_NOT_OURS;		/* LOCK: #UD for all of these */
++		}
++		break;
++	}
++
++	if (b[p] == 0xC4) {
++		/* three-byte VEX; 66/F2/F3/REX before VEX is #UD */
++		if (osz || rep)
++			return ISA_DEC_NOT_OURS;
++		ISA_NEED(4);
++		R = !(b[p + 1] & 0x80);
++		X = !(b[p + 1] & 0x40);
++		B = !(b[p + 1] & 0x20);
++		map = b[p + 1] & 0x1F;
++		W = b[p + 2] >> 7;
++		vvvv = (~(b[p + 2] >> 3)) & 0x0F;
++		L = (b[p + 2] >> 2) & 1;
++		pp = b[p + 2] & 3;
++		opcode = b[p + 3];
++		p += 4;
++		vex = 1;
++	} else {
++		u8 rex = 0;
++
++		if ((b[p] & 0xF0) == 0x40) {
++			rex = b[p++];
++			ISA_NEED(1);
++		}
++		if (b[p] != 0x0F)
++			return ISA_DEC_NOT_OURS;
++		p++;
++		ISA_NEED(2);
++		if (b[p] == 0x38)
++			map = 2;
++		else if (b[p] == 0x3A)
++			map = 3;
++		else
++			return ISA_DEC_NOT_OURS;
++		opcode = b[p + 1];
++		p += 2;
++		if (rep)
++			return ISA_DEC_NOT_OURS;
++		pp = osz;
++		R = (rex >> 2) & 1;
++		X = (rex >> 1) & 1;
++		B = rex & 1;
++	}
++
++	for (i = 0; i < (int)(sizeof(isa_optab) / sizeof(isa_optab[0])); i++) {
++		const struct isa_optab *c = &isa_optab[i];
++
++		if (c->map != map || c->pp != pp || c->opcode != opcode)
++			continue;
++		if (vex ? !c->vex : !c->legacy)
++			continue;
++		if (vex && c->w != 2 && c->w != W)
++			continue;
++		t = c;
++		break;
++	}
++	if (!t)
++		return ISA_DEC_NOT_OURS;
++
++	ISA_NEED(1);
++	modrm = b[p++];
++	mod = modrm >> 6;
++	rmf = modrm & 7;
++
++	in->op = t->op;
++	in->legacy = !vex;
++	in->vl = (vex && L) ? 32 : 16;
++	in->reg = ((modrm >> 3) & 7) | (R << 3);
++	in->vvvv = vex ? vvvv : in->reg;
++	in->seg = seg;
++	in->addr32 = addr32;
++
++	if (mod == 3) {
++		in->rm = rmf | (B << 3);
++	} else {
++		in->is_mem = 1;
++		if (rmf == 4) {
++			u8 sib;
++
++			ISA_NEED(1);
++			sib = b[p++];
++			in->scale = sib >> 6;
++			if (((sib >> 3) & 7) != 4 || X) {
++				in->has_index = 1;
++				in->index = ((sib >> 3) & 7) | (X << 3);
++			}
++			if ((sib & 7) == 5 && mod == 0) {
++				ISA_NEED(4);
++				in->disp = (s32)isa_rd32(b + p);
++				p += 4;
++			} else {
++				in->has_base = 1;
++				in->base = (sib & 7) | (B << 3);
++			}
++		} else if (rmf == 5 && mod == 0) {
++			in->rip_rel = 1;
++			ISA_NEED(4);
++			in->disp = (s32)isa_rd32(b + p);
++			p += 4;
++		} else {
++			in->has_base = 1;
++			in->base = rmf | (B << 3);
++		}
++		if (mod == 1) {
++			ISA_NEED(1);
++			in->disp = (s8)b[p++];
++		} else if (mod == 2) {
++			ISA_NEED(4);
++			in->disp = (s32)isa_rd32(b + p);
++			p += 4;
++		}
++	}
++	if (t->has_imm) {
++		ISA_NEED(1);
++		in->imm = b[p++];
++	}
++	in->len = p;
++	return p;
++#undef ISA_NEED
++}
++
++/*
++ * Effective address of the memory operand. gpr[] is indexed by x86 register number
++ * (0 = rax, 1 = rcx, 2 = rdx, 3 = rbx, 4 = rsp, 5 = rbp, 6 = rsi, 7 = rdi, 8..15 = r8..r15);
++ * ip is the address of the instruction; segbase is the FS/GS base when in->seg is set.
++ */
++static inline u64 isa_emu_ea(const struct isa_insn *in, const u64 *gpr, u64 ip, u64 segbase)
++{
++	u64 ea = (u64)(s64)in->disp;
++
++	if (in->rip_rel)
++		ea += ip + in->len;
++	if (in->has_base)
++		ea += gpr[in->base];
++	if (in->has_index)
++		ea += gpr[in->index] << in->scale;
++	if (in->addr32)
++		ea = (u32)ea;
++	return ea + segbase;
++}
++
++/* ---- GF(2^8) and AES tables -------------------------------------------------- */
++
++struct isa_tables {
++	u8 gf_inv[256];
++	u8 sbox[256];
++	u8 inv_sbox[256];
++};
++
++static inline u8 isa_gf_mul(u8 a, u8 b)
++{
++	u8 r = 0;
++
++	while (b) {
++		if (b & 1)
++			r ^= a;
++		a = (u8)(a << 1) ^ ((a & 0x80) ? 0x1B : 0);
++		b >>= 1;
++	}
++	return r;
++}
++
++static inline u8 isa_parity8(u8 v)
++{
++	v ^= v >> 4;
++	v ^= v >> 2;
++	v ^= v >> 1;
++	return v & 1;
++}
++
++/* SDM: out.bit[i] = parity(matrix.byte[7 - i] & x) ^ imm.bit[i] */
++static inline u8 isa_affine_byte(u64 m, u8 x, u8 imm)
++{
++	u8 r = 0;
++	int i;
++
++	for (i = 0; i < 8; i++)
++		r |= (u8)(isa_parity8((u8)(m >> (8 * (7 - i))) & x) << i);
++	return r ^ imm;
++}
++
++static inline void isa_emu_init_tables(struct isa_tables *t)
++{
++	int a, b;
++
++	t->gf_inv[0] = 0;
++	for (a = 1; a < 256; a++)
++		for (b = 1; b < 256; b++)
++			if (isa_gf_mul((u8)a, (u8)b) == 1) {
++				t->gf_inv[a] = (u8)b;
++				break;
++			}
++	/* AES S-box = affine(inverse(x)) with the AES matrix and constant 0x63 */
++	for (a = 0; a < 256; a++) {
++		u8 s = isa_affine_byte(0xF1E3C78F1F3E7CF8ULL, t->gf_inv[a], 0x63);
++
++		t->sbox[a] = s;
++		t->inv_sbox[s] = (u8)a;
++	}
++}
++
++/* ---- AES rounds (one 128-bit lane) ------------------------------------------- */
++
++static inline void isa_aes_round(const struct isa_tables *t, int op, u8 *out,
++				 const u8 *state, const u8 *key)
++{
++	u8 s[16], m[16];
++	int r, c, i;
++	int dec = (op == ISA_AESDEC || op == ISA_AESDECLAST);
++	int last = (op == ISA_AESENCLAST || op == ISA_AESDECLAST);
++
++	for (c = 0; c < 4; c++)
++		for (r = 0; r < 4; r++) {
++			if (!dec)
++				s[r + 4 * c] = t->sbox[state[r + 4 * ((c + r) & 3)]];
++			else
++				s[r + 4 * c] = t->inv_sbox[state[r + 4 * ((c - r) & 3)]];
++		}
++	if (last) {
++		memcpy(m, s, 16);
++	} else if (!dec) {
++		for (c = 0; c < 4; c++) {
++			const u8 *a = s + 4 * c;
++
++			m[4 * c + 0] = isa_gf_mul(a[0], 2) ^ isa_gf_mul(a[1], 3) ^ a[2] ^ a[3];
++			m[4 * c + 1] = a[0] ^ isa_gf_mul(a[1], 2) ^ isa_gf_mul(a[2], 3) ^ a[3];
++			m[4 * c + 2] = a[0] ^ a[1] ^ isa_gf_mul(a[2], 2) ^ isa_gf_mul(a[3], 3);
++			m[4 * c + 3] = isa_gf_mul(a[0], 3) ^ a[1] ^ a[2] ^ isa_gf_mul(a[3], 2);
++		}
++	} else {
++		for (c = 0; c < 4; c++) {
++			const u8 *a = s + 4 * c;
++
++			m[4 * c + 0] = isa_gf_mul(a[0], 14) ^ isa_gf_mul(a[1], 11) ^ isa_gf_mul(a[2], 13) ^ isa_gf_mul(a[3], 9);
++			m[4 * c + 1] = isa_gf_mul(a[0], 9) ^ isa_gf_mul(a[1], 14) ^ isa_gf_mul(a[2], 11) ^ isa_gf_mul(a[3], 13);
++			m[4 * c + 2] = isa_gf_mul(a[0], 13) ^ isa_gf_mul(a[1], 9) ^ isa_gf_mul(a[2], 14) ^ isa_gf_mul(a[3], 11);
++			m[4 * c + 3] = isa_gf_mul(a[0], 11) ^ isa_gf_mul(a[1], 13) ^ isa_gf_mul(a[2], 9) ^ isa_gf_mul(a[3], 14);
++		}
++	}
++	for (i = 0; i < 16; i++)
++		out[i] = m[i] ^ key[i];
++}
++
++/* ---- SHA helpers --------------------------------------------------------------- */
++
++static inline u32 isa_rol32(u32 v, int n) { return (v << n) | (v >> (32 - n)); }
++static inline u32 isa_ror32(u32 v, int n) { return (v >> n) | (v << (32 - n)); }
++
++static inline void isa_sha1rnds4(u8 *out, const u8 *s1, const u8 *s2, u8 imm)
++{
++	static const u32 K[4] = { 0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6 };
++	u32 a = isa_rd32(s1 + 12), b = isa_rd32(s1 + 8), c = isa_rd32(s1 + 4), d = isa_rd32(s1);
++	u32 w[4] = { isa_rd32(s2 + 12), isa_rd32(s2 + 8), isa_rd32(s2 + 4), isa_rd32(s2) };
++	u32 e = 0, k = K[imm & 3];
++	int i;
++
++	for (i = 0; i < 4; i++) {
++		u32 f, tmp;
++
++		switch (imm & 3) {
++		case 0: f = (b & c) ^ (~b & d); break;
++		case 2: f = (b & c) ^ (b & d) ^ (c & d); break;
++		default: f = b ^ c ^ d; break;
++		}
++		tmp = f + isa_rol32(a, 5) + w[i] + e + k;
++		e = d;
++		d = c;
++		c = isa_rol32(b, 30);
++		b = a;
++		a = tmp;
++	}
++	isa_wr32(out + 12, a);
++	isa_wr32(out + 8, b);
++	isa_wr32(out + 4, c);
++	isa_wr32(out, d);
++}
++
++static inline void isa_sha256rnds2(u8 *out, const u8 *s1, const u8 *s2, const u8 *xmm0)
++{
++	u32 a = isa_rd32(s2 + 12), b = isa_rd32(s2 + 8), e = isa_rd32(s2 + 4), f = isa_rd32(s2);
++	u32 c = isa_rd32(s1 + 12), d = isa_rd32(s1 + 8), g = isa_rd32(s1 + 4), h = isa_rd32(s1);
++	int i;
++
++	for (i = 0; i < 2; i++) {
++		u32 wk = isa_rd32(xmm0 + 4 * i);
++		u32 ch = (e & f) ^ (~e & g);
++		u32 maj = (a & b) ^ (a & c) ^ (b & c);
++		u32 s1e = isa_ror32(e, 6) ^ isa_ror32(e, 11) ^ isa_ror32(e, 25);
++		u32 s0a = isa_ror32(a, 2) ^ isa_ror32(a, 13) ^ isa_ror32(a, 22);
++		u32 t1 = ch + s1e + wk + h;
++		u32 na = t1 + maj + s0a;
++		u32 ne = t1 + d;
++
++		h = g; g = f; f = e; e = ne;
++		d = c; c = b; b = a; a = na;
++	}
++	isa_wr32(out + 12, a);
++	isa_wr32(out + 8, b);
++	isa_wr32(out + 4, e);
++	isa_wr32(out, f);
++}
++
++static inline u32 isa_sig0(u32 x) { return isa_ror32(x, 7) ^ isa_ror32(x, 18) ^ (x >> 3); }
++static inline u32 isa_sig1(u32 x) { return isa_ror32(x, 17) ^ isa_ror32(x, 19) ^ (x >> 10); }
++
++/* ---- carry-less multiply --------------------------------------------------------- */
++
++static inline void isa_clmul64(u64 a, u64 b, u64 *lo, u64 *hi)
++{
++	u64 l = 0, h = 0;
++	int i;
++
++	for (i = 0; i < 64; i++)
++		if ((b >> i) & 1) {
++			l ^= a << i;
++			if (i)
++				h ^= a >> (64 - i);
++		}
++	*lo = l;
++	*hi = h;
++}
++
++static inline s32 isa_sat32(s64 v)
++{
++	if (v > 2147483647LL)
++		return 2147483647;
++	if (v < -2147483648LL)
++		return (s32)(-2147483647 - 1);
++	return (s32)v;
++}
++
++/*
++ * Compute one instruction.
++ *   dst   in: current value of the destination register (32 bytes)
++ *         out: new value of the destination register (32 bytes). Legacy encodings
++ *              keep bytes 16..31; VEX.128 zeroes them.
++ *   src1  first source (VEX.vvvv register; for legacy encodings the destination)
++ *   src2  second source (register or memory), vl bytes valid
++ *   xmm0  low 16 bytes of XMM0 (only read by SHA256RNDS2)
++ * Sources may alias dst.
++ */
++static inline void isa_emu_compute(const struct isa_tables *t, const struct isa_insn *in,
++				   u8 *dst, const u8 *src1, const u8 *src2, const u8 *xmm0)
++{
++	u8 a[32], b[32], d[32], r[32];
++	int vl = in->vl, i, j;
++
++	memcpy(d, dst, 32);
++	memcpy(a, src1, 32);
++	memset(b, 0, 32);
++	memcpy(b, src2, vl);
++	memset(r, 0, 32);
++
++	switch (in->op) {
++	case ISA_GF2P8AFFINEQB:
++	case ISA_GF2P8AFFINEINVQB:
++		for (i = 0; i < vl; i++) {
++			u8 x = a[i];
++
++			if (in->op == ISA_GF2P8AFFINEINVQB)
++				x = t->gf_inv[x];
++			r[i] = isa_affine_byte(isa_rd64(b + (i & ~7)), x, in->imm);
++		}
++		break;
++	case ISA_GF2P8MULB:
++		for (i = 0; i < vl; i++)
++			r[i] = isa_gf_mul(a[i], b[i]);
++		break;
++	case ISA_VPDPBUSD:
++	case ISA_VPDPBUSDS:
++		for (i = 0; i < vl; i += 4) {
++			s64 sum = 0;
++
++			for (j = 0; j < 4; j++)
++				sum += (s64)a[i + j] * (s64)(s8)b[i + j];
++			if (in->op == ISA_VPDPBUSDS)
++				isa_wr32(r + i, (u32)isa_sat32((s64)(s32)isa_rd32(d + i) + sum));
++			else
++				isa_wr32(r + i, isa_rd32(d + i) + (u32)sum);
++		}
++		break;
++	case ISA_VPDPWSSD:
++	case ISA_VPDPWSSDS:
++		for (i = 0; i < vl; i += 4) {
++			s64 sum = (s64)(s16)isa_rd16(a + i) * (s64)(s16)isa_rd16(b + i) +
++				  (s64)(s16)isa_rd16(a + i + 2) * (s64)(s16)isa_rd16(b + i + 2);
++
++			if (in->op == ISA_VPDPWSSDS)
++				isa_wr32(r + i, (u32)isa_sat32((s64)(s32)isa_rd32(d + i) + sum));
++			else
++				isa_wr32(r + i, isa_rd32(d + i) + (u32)sum);
++		}
++		break;
++	case ISA_VPMADD52LUQ:
++	case ISA_VPMADD52HUQ:
++		for (i = 0; i < vl; i += 8) {
++			unsigned __int128 p = (unsigned __int128)(isa_rd64(a + i) & 0xFFFFFFFFFFFFFULL) *
++					      (isa_rd64(b + i) & 0xFFFFFFFFFFFFFULL);
++			u64 part = in->op == ISA_VPMADD52LUQ ? (u64)p & 0xFFFFFFFFFFFFFULL
++							    : (u64)(p >> 52);
++
++			isa_wr64(r + i, isa_rd64(d + i) + part);
++		}
++		break;
++	case ISA_AESENC:
++	case ISA_AESENCLAST:
++	case ISA_AESDEC:
++	case ISA_AESDECLAST:
++		for (i = 0; i < vl; i += 16)
++			isa_aes_round(t, in->op, r + i, a + i, b + i);
++		break;
++	case ISA_PCLMULQDQ:
++		for (i = 0; i < vl; i += 16) {
++			u64 lo, hi;
++
++			isa_clmul64(isa_rd64(a + i + ((in->imm & 0x01) ? 8 : 0)),
++				    isa_rd64(b + i + ((in->imm & 0x10) ? 8 : 0)), &lo, &hi);
++			isa_wr64(r + i, lo);
++			isa_wr64(r + i + 8, hi);
++		}
++		break;
++	case ISA_SHA1RNDS4:
++		isa_sha1rnds4(r, a, b, in->imm);
++		break;
++	case ISA_SHA1NEXTE:
++		memcpy(r, b, 12);
++		isa_wr32(r + 12, isa_rd32(b + 12) + isa_rol32(isa_rd32(a + 12), 30));
++		break;
++	case ISA_SHA1MSG1:
++		isa_wr32(r + 12, isa_rd32(a + 4) ^ isa_rd32(a + 12));
++		isa_wr32(r + 8, isa_rd32(a) ^ isa_rd32(a + 8));
++		isa_wr32(r + 4, isa_rd32(b + 12) ^ isa_rd32(a + 4));
++		isa_wr32(r, isa_rd32(b + 8) ^ isa_rd32(a));
++		break;
++	case ISA_SHA1MSG2: {
++		u32 w16 = isa_rol32(isa_rd32(a + 12) ^ isa_rd32(b + 8), 1);
++		u32 w17 = isa_rol32(isa_rd32(a + 8) ^ isa_rd32(b + 4), 1);
++		u32 w18 = isa_rol32(isa_rd32(a + 4) ^ isa_rd32(b), 1);
++		u32 w19 = isa_rol32(isa_rd32(a) ^ w16, 1);
++
++		isa_wr32(r + 12, w16);
++		isa_wr32(r + 8, w17);
++		isa_wr32(r + 4, w18);
++		isa_wr32(r, w19);
++		break;
++	}
++	case ISA_SHA256RNDS2:
++		isa_sha256rnds2(r, a, b, xmm0);
++		break;
++	case ISA_SHA256MSG1:
++		isa_wr32(r + 12, isa_rd32(a + 12) + isa_sig0(isa_rd32(b)));
++		isa_wr32(r + 8, isa_rd32(a + 8) + isa_sig0(isa_rd32(a + 12)));
++		isa_wr32(r + 4, isa_rd32(a + 4) + isa_sig0(isa_rd32(a + 8)));
++		isa_wr32(r, isa_rd32(a) + isa_sig0(isa_rd32(a + 4)));
++		break;
++	case ISA_SHA256MSG2: {
++		u32 w16 = isa_rd32(a) + isa_sig1(isa_rd32(b + 8));
++		u32 w17 = isa_rd32(a + 4) + isa_sig1(isa_rd32(b + 12));
++		u32 w18 = isa_rd32(a + 8) + isa_sig1(w16);
++		u32 w19 = isa_rd32(a + 12) + isa_sig1(w17);
++
++		isa_wr32(r, w16);
++		isa_wr32(r + 4, w17);
++		isa_wr32(r + 8, w18);
++		isa_wr32(r + 12, w19);
++		break;
++	}
++	default:
++		memcpy(r, d, 32);
++		break;
++	}
++
++	if (in->legacy)
++		memcpy(r + 16, d + 16, 16);	/* legacy SSE leaves bits 255:128 alone */
++	memcpy(dst, r, 32);
++}
++
++#endif /* ISA_EMU_CORE_H */
+diff --git a/arch/x86/kernel/isa_emu_fastpath.h b/arch/x86/kernel/isa_emu_fastpath.h
+new file mode 100755
+index 000000000..3d82ab3dd
+--- /dev/null
++++ b/arch/x86/kernel/isa_emu_fastpath.h
+@@ -0,0 +1,101 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * isa_emu_fastpath.h - recognise well-known whole functions built from emulated instructions.
++ *
++ * Emulating one instruction per trap is correct but slow when a function consists mostly of
++ * such instructions. BoringSSL's SHA-NI SHA-256 block function needs about 56 traps per 64-byte
++ * block and, on CPUs without SHA-NI, causes almost all traps during boot. When the trap site
++ * is the first SHA256RNDS2 of a function whose bytes hash to a known value, the kernel can do
++ * the whole remaining job (hash every remaining block) natively and resume at the function's
++ * `ret`. If anything does not match, or user memory cannot be read, nothing is modified and the
++ * normal one-instruction emulation proceeds, so this is purely an optimisation.
++ *
++ * Shared by the kernel (arch/x86/kernel/isa_emu.c) and the userspace test (test/fptest.c).
++ */
++#ifndef ISA_EMU_FASTPATH_H
++#define ISA_EMU_FASTPATH_H
++
++#define ISA_FP_SHA256_BLOCKS 1	/* void f(u32 state[8] /rdi/, const u8 *data /rsi/, size_t blocks /rdx/) */
++#define ISA_FP_SHA1_BLOCKS 2	/* void f(u32 state[5] /rdi/, const u8 *data /rsi/, size_t blocks /rdx/) */
++
++struct isa_fastpath {
++	u8 kind;
++	u8 head[8];	/* instruction bytes at the trap site (cheap prefilter) */
++	u16 len;	/* function length, start through `ret` */
++	u16 trap_off;	/* offset of the trap site */
++	u16 ret_off;	/* offset of the `ret` */
++	u16 mask_off;	/* bytes excluded from the hash (a RIP-relative displacement) */
++	u8 mask_len;
++	u64 hash;	/* FNV-1a 64 over the function bytes, masked bytes taken as 0 */
++};
++
++#include "isa_emu_fastpath_table.h"
++
++#define ISA_FP_COUNT ((int)(sizeof(isa_fastpaths) / sizeof(isa_fastpaths[0])))
++#define ISA_FP_MAX_LEN 1024
++
++static inline u64 isa_fp_hash(const u8 *fn, const struct isa_fastpath *e)
++{
++	u64 h = 0xCBF29CE484222325ULL;
++	unsigned int i;
++
++	for (i = 0; i < e->len; i++) {
++		u8 b = (i >= e->mask_off && i < (unsigned int)e->mask_off + e->mask_len) ? 0 : fn[i];
++
++		h = (h ^ b) * 0x100000001B3ULL;
++	}
++	return h;
++}
++
++/* Next table entry at or after index i whose trap-site bytes match insn[0..8), or -1. */
++static inline int isa_fp_next(const u8 *insn, int avail, int kind, int i)
++{
++	if (avail < 8)
++		return -1;
++	for (; i < ISA_FP_COUNT; i++)
++		if (isa_fastpaths[i].kind == kind && isa_fastpaths[i].len <= ISA_FP_MAX_LEN &&
++		    !memcmp(insn, isa_fastpaths[i].head, 8))
++			return i;
++	return -1;
++}
++
++/*
++ * SHA-256 working state at the trap site of sha256_block_data_order_hw:
++ * xmm1 = A,B,E,F and xmm2 = C,D,G,H, most significant dword first.
++ */
++static inline void isa_fp_sha256_state(u32 h[8], const u8 *xmm1, const u8 *xmm2)
++{
++	h[0] = isa_rd32(xmm1 + 12);
++	h[1] = isa_rd32(xmm1 + 8);
++	h[4] = isa_rd32(xmm1 + 4);
++	h[5] = isa_rd32(xmm1);
++	h[2] = isa_rd32(xmm2 + 12);
++	h[3] = isa_rd32(xmm2 + 8);
++	h[6] = isa_rd32(xmm2 + 4);
++	h[7] = isa_rd32(xmm2);
++}
++
++/*
++ * SHA-1 working state at the trap site of BoringSSL's SHA-NI SHA-1 loop (the first SHA1MSG1 of an
++ * iteration, right after the loop head): xmm0 = A,B,C,D and xmm9 = E in its top dword, most significant
++ * dword first. At that point rdx has already been decremented (blocks left after the current one) and rsi
++ * has been advanced to the next block unless the current block is the last. gen_fastpath.py only accepts
++ * variants whose loop head and tail are byte for byte the code this relies on.
++ */
++static inline void isa_fp_sha1_state(u32 h[5], const u8 *xmm0, const u8 *xmm9)
++{
++	h[0] = isa_rd32(xmm0 + 12);
++	h[1] = isa_rd32(xmm0 + 8);
++	h[2] = isa_rd32(xmm0 + 4);
++	h[3] = isa_rd32(xmm0);
++	h[4] = isa_rd32(xmm9 + 12);
++}
++
++/* Current block and number of blocks (including the current one) from rsi/rdx at the SHA-1 trap site. */
++static inline void isa_fp_sha1_args(u64 rsi, u64 rdx, u64 *data, u64 *blocks)
++{
++	*blocks = rdx + 1;
++	*data = rdx ? rsi - 64 : rsi;
++}
++
++#endif /* ISA_EMU_FASTPATH_H */
+diff --git a/arch/x86/kernel/isa_emu_fastpath_table.h b/arch/x86/kernel/isa_emu_fastpath_table.h
+new file mode 100755
+index 000000000..1b0f39f6c
+--- /dev/null
++++ b/arch/x86/kernel/isa_emu_fastpath_table.h
+@@ -0,0 +1,8 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/* Generated by pixelbook/isa_emu/gen_fastpath.py. Contains no code: offsets, 8 opcode bytes at the
++ * trap site and a hash per known variant of BoringSSL sha256_block_data_order_hw and of the SHA-NI
++ * path of sha1_block_data_order. */
++static const struct isa_fastpath isa_fastpaths[] = {
++	{ ISA_FP_SHA256_BLOCKS, { 0x0f, 0x38, 0xcb, 0xd1, 0x66, 0x0f, 0x70, 0xc0 }, 829, 107, 828, 3, 4, 0xb31e2a368c69d94eULL },	/* 39 ELFs */
++	{ ISA_FP_SHA1_BLOCKS, { 0x0f, 0x38, 0xc9, 0xe5, 0x66, 0x0f, 0x6f, 0xd0 }, 635, 107, 634, 13, 4, 0x248b6e382b110996ULL },	/* 25 ELFs */
++};
+diff --git a/arch/x86/kernel/traps.c b/arch/x86/kernel/traps.c
+index 6b22611e6..61edcbe17 100644
+--- a/arch/x86/kernel/traps.c
++++ b/arch/x86/kernel/traps.c
+@@ -301,6 +301,10 @@ void handle_invalid_op(struct pt_regs *regs)
+ static inline void handle_invalid_op(struct pt_regs *regs)
+ #endif
+ {
++	/* Emulate ISA extensions user space assumes but this CPU lacks. */
++	if (user_mode(regs) && isa_emu_fixup(regs))
++		return;
++
+ 	do_error_trap(regs, 0, "invalid opcode", X86_TRAP_UD, SIGILL,
+ 		      ILL_ILLOPN, error_get_trap_addr(regs));
+ }
+diff --git a/drivers/hid/hid-multitouch.c b/drivers/hid/hid-multitouch.c
+index 5e9292108..822eecf26 100644
+--- a/drivers/hid/hid-multitouch.c
++++ b/drivers/hid/hid-multitouch.c
+@@ -409,11 +409,10 @@ static const struct mt_class mt_classes[] = {
+ 			MT_QUIRK_STICKY_FINGERS |
+ 			MT_QUIRK_FORCE_GET_FEATURE,
+ 	},
+-	{ .name = MT_CLS_GOOGLE,
++	{ .name = MT_CLS_GOOGLE,	/* pixelbook: no hover (see pixelbook/kernel/apply.sh) */
+ 		.quirks = MT_QUIRK_ALWAYS_VALID |
+ 			MT_QUIRK_CONTACT_CNT_ACCURATE |
+-			MT_QUIRK_SLOT_IS_CONTACTID |
+-			MT_QUIRK_HOVERING
++			MT_QUIRK_SLOT_IS_CONTACTID
+ 	},
+ 	{ .name = MT_CLS_RAZER_BLADE_STEALTH,
+ 		.quirks = MT_QUIRK_ALWAYS_VALID |
+diff --git a/kernel/module/Kconfig b/kernel/module/Kconfig
+index 8376a75b5..57e6c4389 100644
+--- a/kernel/module/Kconfig
++++ b/kernel/module/Kconfig
+@@ -316,6 +316,15 @@ config MODULE_SIG_PROTECT_LIST
+ 	  directory containing the list of module names, one per line. The path
+ 	  can be absolute, or relative to the kernel source or obj tree.
+ 
++config MODULE_SIG_PROTECT_PREBUILT
++	bool "Let modules with unverifiable signatures use protected symbols"
++	depends on MODULE_SIG_PROTECT
++	default y
++	help
++	  Allow prebuilt GKI modules, whose signing key this rebuilt kernel does
++	  not have, to use and export protected symbols. Only for running an
++	  unmodified vendor/system module set on a rebuilt GKI kernel.
++
+ config MODULE_SIG_PROTECT
+ 	def_bool y
+ 	depends on MODULE_SIG_PROTECT_LIST != ""
+diff --git a/kernel/module/main.c b/kernel/module/main.c
+index 8a368767b..789860c12 100644
+--- a/kernel/module/main.c
++++ b/kernel/module/main.c
+@@ -1274,7 +1274,8 @@ static const struct kernel_symbol *resolve_symbol(struct module *mod,
+ 	}
+ 
+ #ifdef CONFIG_MODULE_SIG
+-	if (fsa.is_protected && !mod->sig_ok) {
++	if (fsa.is_protected && !mod->sig_ok &&
++	    !IS_ENABLED(CONFIG_MODULE_SIG_PROTECT_PREBUILT)) {
+ 		pr_warn("%s: Cannot use protected symbol %s\n",
+ 			mod->name, name);
+ 		fsa.sym = ERR_PTR(-EACCES);
+@@ -1512,7 +1513,7 @@ static int verify_exported_symbols(struct module *mod)
+ 			return -ENOEXEC;
+ 		}
+ #ifdef CONFIG_MODULE_SIG_PROTECT
+-		if (!mod->sig_ok && is_protected_export(s)) {
++		if (!mod->sig_ok && !IS_ENABLED(CONFIG_MODULE_SIG_PROTECT_PREBUILT) && is_protected_export(s)) {
+ 			pr_err("%s: exports protected symbol %s\n",
+ 			       mod->name, kernel_symbol_name(s));
+ 			return -EACCES;
+diff --git a/sound/soc/intel/avs/path.c b/sound/soc/intel/avs/path.c
+index 7aa20fcf1..12065f641 100644
+--- a/sound/soc/intel/avs/path.c
++++ b/sound/soc/intel/avs/path.c
+@@ -176,9 +176,17 @@ int avs_path_set_constraint(struct avs_dev *adev, struct avs_tplg_path_template
+ 	unsigned int *rlist, *clist, *slist;
+ 	size_t i;
+ 
+-	i = 0;
+-	list_for_each_entry(path_template, &template->path_list, node)
+-		i++;
++	i = 0;	/* pixelbook: one slot per module, not per path (see pixelbook/kernel/apply.sh) */
++	list_for_each_entry(path_template, &template->path_list, node) {
++		struct avs_tplg_pipeline *pipeline_template;
++
++		list_for_each_entry(pipeline_template, &path_template->ppl_list, node) {
++			struct avs_tplg_module *module_template;
++
++			list_for_each_entry(module_template, &pipeline_template->mod_list, node)
++				i++;
++		}
++	}
+ 
+ 	rlist = kcalloc(i, sizeof(*rlist), GFP_KERNEL);
+ 	clist = kcalloc(i, sizeof(*clist), GFP_KERNEL);

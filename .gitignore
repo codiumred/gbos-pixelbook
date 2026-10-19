@@ -1,0 +1,14 @@
+# downloaded inputs and build outputs: Google-derived, never commit
+/inputs/
+/work/
+*.img
+*.raw
+*.bin
+*.zip
+*.ko
+# local logs and device captures (may contain device identifiers)
+/logs/
+/evidence/
+*.log
+__pycache__/
+*.pyc

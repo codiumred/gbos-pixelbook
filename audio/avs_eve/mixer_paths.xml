@@ -1,0 +1,24 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!--
+  Initial mixer state for the Pixelbook speaker card (avsmax98927). Values are the EnableSequence of
+  ChromeOS's UCM file for this card. Headset and microphone controls live on other cards and are not set here
+  yet; they need the next boot's card/control dump.
+-->
+<mixer enum_mixer_numeric_fallback="true">
+	<ctl name="Left DAI Sel Mux" value="Left" />
+	<ctl name="Right DAI Sel Mux" value="Right" />
+	<ctl name="Left Speaker Volume" value="3" />
+	<ctl name="Right Speaker Volume" value="3" />
+	<ctl name="Left Digital Volume" value="60" />
+	<ctl name="Right Digital Volume" value="60" />
+	<ctl name="Left Spk Switch" value="1" />
+	<ctl name="Right Spk Switch" value="1" />
+	<ctl name="Left Boost Output Voltage" value="0" />
+	<ctl name="Right Boost Output Voltage" value="0" />
+	<ctl name="Left Current Limit" value="7" />
+	<ctl name="Right Current Limit" value="7" />
+	<path name="Speaker" />
+	<path name="Headphone" />
+	<path name="InternalMic" />
+	<path name="Mic" />
+</mixer>
