@@ -6,7 +6,8 @@ recovery tools differ depending on which firmware route you take.
 ## 1. Firmware: two routes
 
 The Pixelbook's stock firmware only boots ChromeOS. [MrChromebox](https://docs.mrchromebox.tech) provides UEFI
-firmware for it (board name **EVE**). Both routes below have been used with this project.
+firmware for it (board name **EVE**). This project was developed with RW_LEGACY; the full ROM is the recommended
+route for daily use (not yet tried with this project).
 
 | | RW_LEGACY | Full UEFI ROM |
 |---|---|---|
@@ -72,6 +73,8 @@ The boot menu:
   - *Suspend test, S3 (deep)* and *Suspend test, s2idle* - closing the lid suspends the machine (normally it stays
     awake, because suspend never resumed in earlier tests). If it does not wake up, press Refresh+Power and copy the
     logs: the kernel log of the failed resume is kept.
+  - *Full diagnostics logging* - the logger takes 60 snapshots over 30 minutes instead of 10 (also on in the crash and
+    suspend entries).
   - *Serial console (QEMU)* - for virtual machine tests.
 - **UEFI firmware settings**.
 
@@ -91,7 +94,8 @@ This replaces ChromeOS. App data then lives on the internal storage (eMMC) and s
 be kept as a recovery and test disk.
 
 Before you start: flash the full UEFI ROM (section 1) if you want the Pixelbook to start Googlebook OS without the
-developer-mode screen, and keep a copy of anything you need from ChromeOS.
+developer-mode screen, and keep a copy of anything you need from ChromeOS, in particular its audio firmware
+(`/lib/firmware/intel/avs`, see docs/BUILD.md): future builds need it and ChromeOS is the only source.
 
 1. Boot the USB stick and choose **Install to the internal eMMC**.
 2. Read the screen, type `ERASE` and press Enter. Keep the charger connected.
