@@ -978,3 +978,7 @@ software KeyMint too. None addresses attestation.
 - **Shared work dir**: another session built `eve-attestation.raw` in `~/gb/gbrunch` at 23:19 and rebuilt the shared
   kernel output; the kernel tree was unchanged (its diff equals kernel/pixelbook-kernel.patch). Builds of this repo now use
   `~/gbp-work` (native.raw hard-linked).
+- **Built-in installer, end to end** (VERIFIED in QEMU, KVM, emulated USB stick + empty 64 GiB eMMC, booted exactly as
+  the GRUB entry boots it): the init found `/dev/sda` (by boot_a UUID) and `/dev/mmcblk0`, installed, verified, wrote
+  `INSTALL SUCCEEDED` with the step log to the stick's `/EFI/GBRUNCH/install-result.txt`, and powered off (4598 s, the
+  emulated SDHCI's 3-6 MB/s; a real eMMC and USB stick should take about 10 minutes).
