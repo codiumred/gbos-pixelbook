@@ -323,10 +323,16 @@ fi
 for f in /sys/fs/pstore/*; do
     [ -f "$f" ] && cp "$f" "$run/pstore-${f##*/}.txt" && echo "PSTORE ${f##*/}" >> "$status"
 done
+# PIXELBOOK_SNAPSHOTS: 10 snapshots (5 minutes) on a normal boot; the debug menu's full-diagnostics entry
+# (gblog=full on the kernel command line) keeps all 60 (30 minutes). Each snapshot costs CPU on this slow chip.
+snapshots=10
+grep -q "gblog=full" /proc/cmdline 2>/dev/null && snapshots=60
+echo "SNAPSHOTS $snapshots" >> "$status"
 """
     loop = "for n in " + " ".join("%02d" % i for i in range(1, 61)) + "; do"
     assert loop in t, "snapshot loop not found"
     heavy = """
+    [ "${n#0}" -gt "$snapshots" ] && break
     case "$n" in
         02|07|12|17|22|27|32|37|42|47|52|57) heavy=1; heavy_services="activity window display power SurfaceFlinger" ;;
         *) heavy=0; heavy_services="" ;;

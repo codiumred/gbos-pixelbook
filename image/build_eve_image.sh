@@ -216,19 +216,23 @@ fi
 submenu 'Debug and test options' --id debug {
  menuentry 'Crash capture (reboots itself after a freeze and keeps the kernel log)' {
   echo 'If it freezes it should reboot within a minute. If not, press Refresh+Power (not a long power press).'
-  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data $CRASH
+  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data $CRASH gblog=full
   initrd /EFI/GBRUNCH/initrd.gz
  }
  menuentry 'Suspend test: allow sleep on lid close, S3 (deep)' {
   echo 'Lid close suspends the machine. If it does not wake up on lid open or a key press,'
   echo 'press Refresh+Power, then copy the logs: the kernel log of the failed resume is kept.'
-  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data androidboot.gbsuspend=1 mem_sleep_default=deep $SUSPENDDBG $CRASH
+  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data androidboot.gbsuspend=1 mem_sleep_default=deep $SUSPENDDBG $CRASH gblog=full
   initrd /EFI/GBRUNCH/initrd.gz
  }
  menuentry 'Suspend test: allow sleep on lid close, s2idle' {
   echo 'Lid close suspends the machine. If it does not wake up on lid open or a key press,'
   echo 'press Refresh+Power, then copy the logs: the kernel log of the failed resume is kept.'
-  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data androidboot.gbsuspend=1 mem_sleep_default=s2idle $SUSPENDDBG $CRASH
+  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data androidboot.gbsuspend=1 mem_sleep_default=s2idle $SUSPENDDBG $CRASH gblog=full
+  initrd /EFI/GBRUNCH/initrd.gz
+ }
+ menuentry 'Full diagnostics logging (60 log snapshots over 30 minutes instead of 10)' {
+  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data gblog=full
   initrd /EFI/GBRUNCH/initrd.gz
  }
  menuentry 'Serial console and emulation profiling (QEMU)' --id qemu {
