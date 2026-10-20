@@ -61,7 +61,8 @@ MODE=""; grep -q "gb_install=update" /proc/cmdline && MODE=--update
 log "mode: ${MODE:-fresh install}"
 if INSTALL_LOG=/tmp/install-steps.log bash /installer/install_to_disk.sh --yes $MODE "$SRC" "$TGT" >> "$LOG" 2>&1; then
 	cat /tmp/install-steps.log >> "$LOG" 2>/dev/null
-	result "INSTALL SUCCEEDED $(date -u '+%F %T UTC'): Googlebook OS is on the internal eMMC. Remove the USB stick and turn the Pixelbook on."
+	if [ -n "$MODE" ]; then what="UPDATE SUCCEEDED"; else what="INSTALL SUCCEEDED"; fi
+	result "$what $(date -u '+%F %T UTC'): Googlebook OS is on the internal eMMC. Remove the USB stick and turn the Pixelbook on."
 	sync; sleep 2; poweroff -f
 else
 	cat /tmp/install-steps.log >> "$LOG" 2>/dev/null
