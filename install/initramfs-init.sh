@@ -11,7 +11,7 @@ mount -t tmpfs tmpfs /tmp
 mount -t tmpfs -o mode=0755 tmpfs /dev
 mdev -s
 LOG=/tmp/install.log
-log() { echo "$(date -u +%T) $*" >> "$LOG"; }
+log() { echo "$(date -u +%T) $*" | tee -a "$LOG"; }
 log "installer started: $(cat /proc/cmdline)"
 
 # the eMMC controller driver (Google's vendor modules, not built into the kernel)
@@ -33,6 +33,8 @@ for i in $(seq 1 30); do	# USB and eMMC devices appear asynchronously
 	sleep 1
 done
 log "source=$SRC target=$TGT"
+[ -n "$SRC" ] && [ -n "$TGT" ] || { log "block devices: $(ls /sys/block | tr "
+" " ")"; ls -l /dev | grep -E "sd|mmc" >> "$LOG"; for d in /sys/block/sd* /sys/block/mmcblk*; do [ -e "$d" ] && log "$d: $(cat $d/size 2>/dev/null) sectors, dev=$(cat $d/dev 2>/dev/null)"; done; }
 
 result() {	# <text>: write result and log to the stick's EFI partition
 	[ -n "$SRC" ] || return

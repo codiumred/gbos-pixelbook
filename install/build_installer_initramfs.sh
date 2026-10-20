@@ -10,6 +10,9 @@ command -v busybox >/dev/null && file -L "$(command -v busybox)" | grep -q "stat
 	|| { echo "needs a static busybox (apt install busybox-static)"; exit 1; }
 R="$(mktemp -d)"; trap 'rm -rf "$R"' EXIT
 mkdir -p "$R"/{bin,dev,proc,sys,tmp,etc,modules,installer}
+# the kernel opens /dev/console for init before anything is mounted (needs root to create)
+mknod -m 600 "$R/dev/console" c 5 1
+mknod -m 666 "$R/dev/null" c 1 3
 
 cp "$(command -v busybox)" "$R/bin/busybox"
 for a in sh mount umount mdev insmod poweroff reboot sleep mkdir ls; do ln -s busybox "$R/bin/$a"; done
@@ -30,6 +33,13 @@ for t in bash sfdisk wipefs lsblk blkid mke2fs tune2fs mcopy mmd dd sha256sum gz
 	copy_with_libs "$p" "$t"
 done
 [ -f /etc/mke2fs.conf ] && cp /etc/mke2fs.conf "$R/etc/"
+# mtools converts FAT file names through DOS codepage 850 with glibc's iconv, which needs these converter modules
+GCONV="$(dirname "$(find /usr/lib -name IBM850.so -path '*gconv*' | head -1)")"
+[ -n "$GCONV" ] && [ "$GCONV" != . ] || { echo "glibc gconv IBM850 module not found"; exit 1; }
+mkdir -p "$R$GCONV"
+cp "$GCONV/IBM850.so" "$R$GCONV/"
+for f in gconv-modules gconv-modules.cache; do [ -f "$GCONV/$f" ] && cp "$GCONV/$f" "$R$GCONV/"; done
+[ -d "$GCONV/gconv-modules.d" ] && cp -r "$GCONV/gconv-modules.d" "$R$GCONV/"
 for m in cqhci sdhci-uhs2 sdhci-pci; do cp "$GM/$m.ko" "$R/modules/"; done
 install -m 0755 "$HERE/initramfs-init.sh" "$R/init"
 install -m 0755 "$HERE/install_to_disk.sh" "$R/installer/install_to_disk.sh"

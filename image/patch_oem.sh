@@ -151,6 +151,15 @@ on boot
     write /sys/power/wake_lock pixelbook_no_suspend
 """
 
+SUSPENDTEST = """
+# --- pixelbook: suspend test. androidboot.gbsuspend=1 (GRUB's suspend-test entries) releases the keep-awake lock
+# taken above, so closing the lid suspends the machine again. Those entries also choose the sleep state
+# (mem_sleep_default=deep or s2idle) and keep the console alive through suspend, so a failed resume leaves its kernel
+# log in ramoops for the next boot's logs. ---
+on boot && property:ro.boot.gbsuspend=1
+    write /sys/power/wake_unlock pixelbook_no_suspend
+"""
+
 LEGACYCAM = """
 # --- pixelbook: Google's legacy camera provider finds no camera HAL module on this hardware and exits; init then
 # restarts it every 5 seconds forever (seen live over adb). The Pixelbook camera is a USB camera served by the
@@ -172,6 +181,8 @@ def rc(text):
         text = text.rstrip("\n") + "\n" + BACKLIGHT
     if os.environ.get("EVE_SUSPEND", "off") != "on" and "pixelbook: no system suspend" not in text:
         text = text.rstrip("\n") + "\n" + NOSUSPEND
+    if "pixelbook: no system suspend" in text and "pixelbook: suspend test" not in text:
+        text = text.rstrip("\n") + "\n" + SUSPENDTEST      # after NOSUSPEND: same trigger, runs later
     if "pixelbook: Google's legacy camera provider" not in text:
         text = text.rstrip("\n") + "\n" + LEGACYCAM
     ovl = os.environ.get("EVE_OVERLAY_DIR", "")

@@ -19,7 +19,7 @@ start=$(date +%s)
 timeout "${SECS:-5400}" qemu-system-x86_64 -machine q35 -accel tcg,thread=multi -cpu max -smp 4 -m 2048 \
 	-display none -vga none -serial stdio -monitor none -no-reboot -nic none \
 	-kernel "$T/kernel" -initrd "$T/installer.gz" \
-	-append "rdinit=/init androidboot.boot_part_uuid=$UUID $EXTRA console=ttyS0,115200 loglevel=4" \
+	-append "rdinit=/init androidboot.boot_part_uuid=$UUID $EXTRA 8250.nr_uarts=4 console=ttyS0,115200 loglevel=4" \
 	-device qemu-xhci,id=xhci -drive "if=none,id=stick,format=raw,file=$T/stick.raw" -device usb-storage,bus=xhci.0,drive=stick \
 	-device sdhci-pci -drive "if=none,id=mmc,format=raw,file=$T/emmc.img" -device emmc,drive=mmc \
 	> "$T/installer-console.log" 2>&1 || true

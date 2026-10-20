@@ -130,6 +130,9 @@ echo "$DEV" > "$W/eve-cmdline.txt"
 # gbrunch's panic=0), and Google's chromeos_pstore (ramoops in the ACPI-reserved RAM region) keeps the kernel console
 # across that warm reboot; the logger copies /sys/fs/pstore into the next run's log folder. The RCU stall detector
 # runs on the other CPU, so it also fires when one CPU is stuck on a hung device access.
+# Suspend tests: keep the console running through suspend (so ramoops records a hang during resume) and log every
+# PM step.
+SUSPENDDBG="no_console_suspend pm_debug_messages"
 CRASH="panic=10 panic_on_oops=1 softlockup_panic=1 hardlockup_panic=1 nmi_watchdog=1 watchdog_thresh=5 rcupdate.rcu_cpu_stall_timeout=10 sysctl.kernel.panic_on_rcu_stall=1 hung_task_panic=1 hung_task_timeout_secs=60"
 cat > "$W/eve/grub.cfg" <<EOF
 set timeout=5
@@ -156,7 +159,7 @@ smbios --type=1 --get-string=4 --set=system_vendor
 if [ "\$system_vendor" = "QEMU" ]; then
  serial --unit=0 --speed=115200
  terminal_output console serial
- set default=3
+ set default=debug>qemu
 fi
 menuentry 'Googlebook OS' {
  echo 'Starting. The screen stays black until Android draws (about a minute).'
@@ -165,15 +168,6 @@ menuentry 'Googlebook OS' {
 }
 menuentry 'Googlebook OS, safe mode: internal audio off' {
  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data androidboot.gbaudio=0
- initrd /EFI/GBRUNCH/initrd.gz
-}
-menuentry 'Debug: crash capture (reboots itself after a freeze and keeps the kernel log)' {
- echo 'If it freezes it should reboot within a minute. If not, press Refresh+Power (not a long power press).'
- linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data $CRASH
- initrd /EFI/GBRUNCH/initrd.gz
-}
-menuentry 'Serial console and emulation profiling (QEMU)' {
- linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data console=ttyS0,115200 earlycon=uart8250,io,0x3f8,115200 isa_emu=profile
  initrd /EFI/GBRUNCH/initrd.gz
 }
 if [ "\$gb_data" = ram ]; then
@@ -216,6 +210,29 @@ menuentry 'Update the internal eMMC from this USB stick (keeps apps and data)' {
  fi
 }
 fi
+submenu 'Debug and test options' --id debug {
+ menuentry 'Crash capture (reboots itself after a freeze and keeps the kernel log)' {
+  echo 'If it freezes it should reboot within a minute. If not, press Refresh+Power (not a long power press).'
+  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data $CRASH
+  initrd /EFI/GBRUNCH/initrd.gz
+ }
+ menuentry 'Suspend test: allow sleep on lid close, S3 (deep)' {
+  echo 'Lid close suspends the machine. If it does not wake up on lid open or a key press,'
+  echo 'press Refresh+Power, then copy the logs: the kernel log of the failed resume is kept.'
+  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data androidboot.gbsuspend=1 mem_sleep_default=deep $SUSPENDDBG $CRASH
+  initrd /EFI/GBRUNCH/initrd.gz
+ }
+ menuentry 'Suspend test: allow sleep on lid close, s2idle' {
+  echo 'Lid close suspends the machine. If it does not wake up on lid open or a key press,'
+  echo 'press Refresh+Power, then copy the logs: the kernel log of the failed resume is kept.'
+  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data androidboot.gbsuspend=1 mem_sleep_default=s2idle $SUSPENDDBG $CRASH
+  initrd /EFI/GBRUNCH/initrd.gz
+ }
+ menuentry 'Serial console and emulation profiling (QEMU)' --id qemu {
+  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data console=ttyS0,115200 earlycon=uart8250,io,0x3f8,115200 isa_emu=profile
+  initrd /EFI/GBRUNCH/initrd.gz
+ }
+}
 menuentry 'UEFI firmware settings' { fwsetup }
 EOF
 
