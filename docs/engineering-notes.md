@@ -982,3 +982,8 @@ software KeyMint too. None addresses attestation.
   the GRUB entry boots it): the init found `/dev/sda` (by boot_a UUID) and `/dev/mmcblk0`, installed, verified, wrote
   `INSTALL SUCCEEDED` with the step log to the stick's `/EFI/GBRUNCH/install-result.txt`, and powered off (4598 s, the
   emulated SDHCI's 3-6 MB/s; a real eMMC and USB stick should take about 10 minutes).
+- **Update mode** (VERIFIED in QEMU): "Update the internal eMMC" path on the installed eMMC, from a fresh stick copy:
+  system partitions replaced and verified, partition table and UUIDs kept, userdata untouched (same filesystem UUID,
+  creation time and entries), `install.cfg` still `gb_data=disk`. Fresh-install eMMC boot also VERIFIED: own boot_a
+  UUID, /data on ext4, zygote and SurfaceFlinger. (v13's result line says "INSTALL SUCCEEDED" for updates too; fixed in
+  the source for the next build.)
