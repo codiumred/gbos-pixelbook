@@ -26,11 +26,18 @@ recovery, Android 17). "Verified" means seen on the device or in its logs.
 | Phone-assisted setup | Fails to connect to the phone. Likely the Bluetooth controller cannot advertise twice at once (inferred). Manual sign-in works. |
 | Suspend | Closing the lid let Android suspend the machine and it never resumed, so suspend is blocked with a wake lock. The battery drains with the lid closed. |
 | Over-the-air updates | None. Updating means rebuilding and reflashing. |
-| Persistence | App data lives in RAM by default, so each boot is a fresh device. Internal-disk install with persistent data is planned. |
+| Keyboard backlight | Not controllable: the Pixelbook's keyboard light is a Chrome EC LED (`chromeos::kbd_backlight`), which Android only handles for lights that belong to the keyboard device itself. |
+
+## Installing to the internal eMMC
+
+Available (docs/INSTALL.md, section 5), with persistent app data. Tested in QEMU with an emulated eMMC behind an SDHCI
+controller: the installer, the boot from the eMMC, /data on disk and its persistence across a second boot. Not yet
+tested on a Pixelbook.
 
 ## Not tested yet
 
-Headphone jack, microphones, HDMI audio over USB-C, stylus, external displays, battery life.
+Headphone jack, microphones, HDMI audio over USB-C, stylus, external displays, battery life, suspend with the full
+UEFI ROM (the suspend-test entries are there for it).
 
 ## Performance
 

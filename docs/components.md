@@ -44,6 +44,14 @@ kernel/apply.sh ~/gb/kernel/common
 kernel/build.sh ~/gb/kernel/common ~/gb/kernel/out ~/gb/ruby/shipped.config
 ```
 
+## `install/`: internal-disk installer
+
+| File | Purpose |
+|---|---|
+| `install/install_to_disk.sh` | Copies the system from the USB stick (or an image file) to another disk with fresh partition UUIDs, userdata grown to the end, pristine run-time partitions, verified copies, and `/EFI/GBRUNCH/install.cfg` for /data on disk. `--update` replaces only the system partitions of an existing install. Runs on any Linux or from the installer boot entry. |
+| `install/build_installer_initramfs.sh` | Builds `installer.gz`: busybox plus the build host's bash, util-linux, e2fsprogs, mtools and GNU coreutils, the eMMC controller modules and the installer. |
+| `install/initramfs-init.sh` | Its `/init`: finds the USB stick (by the boot_a UUID GRUB passes) and the eMMC, runs the installer, writes the result to the stick's EFI partition, powers off on success. |
+
 ## Boot tests and image assembly
 
 | File | Purpose |
@@ -53,6 +61,8 @@ kernel/build.sh ~/gb/kernel/common ~/gb/kernel/out ~/gb/ruby/shipped.config
 | `qemu/qemu_gbrunch_boot.sh` | Boots that image with a chosen kernel under QEMU TCG. Reaches zygote and SurfaceFlinger; stops there because the VM has no GPU the Android graphics stack supports. |
 | `kernel/eve.config` | Config fragment for the Pixelbook: `CONFIG_DRM_I915=m`. Every other driver the board needs is already in Google's vendor module set. |
 | `build_eve_image.sh` | Pixelbook image: gbrunch's image with the rebuilt kernel, `i915` and Kaby Lake GPU firmware in the initrd, and an ungated GRUB entry. Writes a regular file only. |
+| `qemu/qemu_emmc_boot.sh` | Boots an internal install from an emulated eMMC (SDHCI) under UEFI; run twice to see persistence. |
+| `qemu/qemu_installer_test.sh` | Runs the installer boot path end to end: image as USB stick, empty emulated eMMC. |
 | `qemu/qemu_eve_uefi_boot.sh` | Boots that image the way the device would (UEFI firmware, GRUB, USB storage) on a Kaby Lake-class CPU model. |
 | `audio/` | Audio HAL configuration for the Pixelbook's three AVS cards (`audio_default.xml` replaces Google's fallback, `avs_eve/` is the config directory); applied by `build_eve_image.sh` through `vendor_overlay.py`. |
 | `patch_oem.sh` | Edits the OEM partition of an assembled image: no AICore copy, `/data` in RAM, board firmware (including `intel/avs/*` from the owner's own ChromeOS copy), zram module load, and the improved logger (touchpad and function-key traces, emulation profile, swap/backlight/sound captures). |

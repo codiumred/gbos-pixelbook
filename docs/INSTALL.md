@@ -63,13 +63,17 @@ Plug the stick in, power on, then:
 
 The boot menu:
 
-1. **Googlebook OS** - the normal boot.
-2. **Googlebook OS, safe mode: internal audio off** - leaves the sound cards alone; a way back if audio ever breaks.
-3. **Debug: crash capture** - turns on every lockup detector and makes the system reboot itself after a freeze, so the
-   kernel's last messages survive in RAM (ramoops) for the next boot's logs.
-4. **Serial console (QEMU)** - for virtual machine tests.
-5. **Install to the internal eMMC** - only on the USB stick, see section 5.
-6. **UEFI firmware settings**.
+- **Googlebook OS** - the normal boot.
+- **Googlebook OS, safe mode: internal audio off** - leaves the sound cards alone; a way back if audio ever breaks.
+- **Install to the internal eMMC** and **Update the internal eMMC** - only on the USB stick, see section 5.
+- **Debug and test options**:
+  - *Crash capture* - every lockup detector on, and the system reboots itself after a freeze, so the kernel's last
+    messages survive in RAM (ramoops) for the next boot's logs.
+  - *Suspend test, S3 (deep)* and *Suspend test, s2idle* - closing the lid suspends the machine (normally it stays
+    awake, because suspend never resumed in earlier tests). If it does not wake up, press Refresh+Power and copy the
+    logs: the kernel log of the failed resume is kept.
+  - *Serial console (QEMU)* - for virtual machine tests.
+- **UEFI firmware settings**.
 
 The screen stays black until Android draws, about a minute. The first boot and setup take around 20 minutes on a
 USB stick: app data is in RAM, so Android compiles apps on every boot and nothing persists between boots. That is
@@ -107,4 +111,7 @@ on disk. The same script also runs from any Linux live system: `sudo install/ins
 The first start from the eMMC sets up Android like a new device (about 20 minutes). After that, starts are much
 faster than from the stick because apps stay compiled.
 
-Updating an internal install while keeping its data is not automated yet.
+**Updating an internal install** while keeping apps and data: write the new image to the USB stick (Rufus, or
+`windows/update_usb.ps1`), boot the stick and choose **Update the internal eMMC**, then type `UPDATE`. It replaces the
+system partitions and keeps the partition table, app data and settings. It only accepts an internal install made by
+this installer with the same partition layout; anything else needs a fresh install.
