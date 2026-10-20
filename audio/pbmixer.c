@@ -8,16 +8,60 @@
  *   pbmixer <config file>
  * Config lines: <card id>|<control name>|<value>, '#' starts a comment. Values: integers (all channels), on/off for
  * switches, or the item name for enumerated controls. Cards that do not exist (yet) are retried for up to 20 s.
+ * Messages go to stdout/stderr and to Android's log (logcat tag "pbmixer"): init's stdio_to_kmsg only works on
+ * debuggable builds, so the log socket is used directly, in the record format liblog writes.
  * Static build: gcc -O2 -static -o pbmixer pbmixer.c
  */
 #include <errno.h>
 #include <fcntl.h>
+#include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <sys/uio.h>
+#include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 #include <sound/asound.h>
+
+enum { LOG_INFO = 4, LOG_ERROR = 6 };
+
+/* one record to logd: {log id, tid, realtime} header, then priority, tag and message (liblog's logd writer) */
+static void plog(int prio, const char *fmt, ...)
+{
+	static int fd = -2;
+	char msg[400];
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(msg, sizeof(msg), fmt, ap);
+	va_end(ap);
+	fprintf(prio >= LOG_ERROR ? stderr : stdout, "pbmixer: %s\n", msg);
+	if (fd == -2) {
+		struct sockaddr_un sa = { .sun_family = AF_UNIX, .sun_path = "/dev/socket/logdw" };
+		fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+		if (fd >= 0 && connect(fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+			close(fd);
+			fd = -1;
+		}
+	}
+	if (fd < 0)
+		return;
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	unsigned char hdr[11], pr = (unsigned char)prio;
+	uint16_t tid = (uint16_t)syscall(SYS_gettid);
+	uint32_t sec = (uint32_t)ts.tv_sec, nsec = (uint32_t)ts.tv_nsec;
+	hdr[0] = 0;	/* LOG_ID_MAIN */
+	memcpy(hdr + 1, &tid, 2);
+	memcpy(hdr + 3, &sec, 4);
+	memcpy(hdr + 7, &nsec, 4);
+	struct iovec iov[4] = { { hdr, sizeof(hdr) }, { &pr, 1 }, { (void *)"pbmixer", 8 }, { msg, strlen(msg) + 1 } };
+	if (writev(fd, iov, 4) < 0) { /* logging is best effort */ }
+}
 
 static int open_card(const char *id)
 {
@@ -95,12 +139,12 @@ static int set_control(int fd, const char *name, const char *value)
 int main(int argc, char **argv)
 {
 	if (argc != 2) {
-		fprintf(stderr, "usage: %s <config>\n", argv[0]);
+		plog(LOG_ERROR, "usage: %s <config>", argv[0]);
 		return 2;
 	}
 	FILE *f = fopen(argv[1], "r");
 	if (!f) {
-		perror(argv[1]);
+		plog(LOG_ERROR, "%s: %s", argv[1], strerror(errno));
 		return 2;
 	}
 	char line[512], missing[16][32];
@@ -111,7 +155,7 @@ int main(int argc, char **argv)
 			continue;
 		char *card = line, *name = strchr(line, '|'), *value;
 		if (!name || !(value = strchr(name + 1, '|'))) {
-			fprintf(stderr, "pbmixer: bad line: %s\n", line);
+			plog(LOG_ERROR, "bad line: %s", line);
 			failures++;
 			continue;
 		}
@@ -124,7 +168,7 @@ int main(int argc, char **argv)
 			usleep(500000);	/* the sound cards appear a few seconds into boot */
 		if (fd < 0) {
 			if (!known_missing) {
-				fprintf(stderr, "pbmixer: card %s not found\n", card);
+				plog(LOG_ERROR, "card %s not found", card);
 				if (nmissing < 16)
 					snprintf(missing[nmissing++], sizeof(missing[0]), "%.31s", card);
 			}
@@ -134,12 +178,13 @@ int main(int argc, char **argv)
 		int rc = set_control(fd, name, value);
 		close(fd);
 		if (rc) {
-			fprintf(stderr, "pbmixer: %s: '%s' = '%s': %s\n", card, name, value, strerror(-rc));
+			plog(LOG_ERROR, "%s: '%s' = '%s': %s", card, name, value, strerror(-rc));
 			failures++;
 		} else {
-			printf("pbmixer: %s: '%s' = '%s'\n", card, name, value);
+			plog(LOG_INFO, "%s: '%s' = '%s'", card, name, value);
 		}
 	}
 	fclose(f);
+	plog(failures ? LOG_ERROR : LOG_INFO, "done, %d failure(s)", failures);
 	return failures ? 1 : 0;
 }
