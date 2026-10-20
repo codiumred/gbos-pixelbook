@@ -963,3 +963,18 @@ software KeyMint too. None addresses attestation.
   the `gnu*` builds are used: 10 MB compressed). Result and log go to the stick's ESP; the stick's menu shows them.
 - Audio is on by default again (real `audio_config.xml` in vendor); `androidboot.gbaudio=0` (safe-mode entry)
   bind-mounts the placeholder. Debug SELinux rules for camera/ALSA/backlight removed; pstore read kept for the logger.
+- **Headset and microphones**: dras's strings show per-card mixer-path controllers, but "Not supported loading mixer paths
+  for sound card" (INFERRED: only the primary card gets mixer_paths.xml). `audio/pbmixer.c` sets ChromeOS's UCM values
+  on avsrt5663 and avsrt5514 once the audio HAL runs, as audioserver in the hal_audio_default domain (file label
+  hal_audio_default_exec), logging to logcat through /dev/socket/logdw (init's `stdio_to_kmsg` needs a debuggable build).
+  All 15 control names and both mux items exist in the 6.18 rt5663/rt5514/AVS board sources (VERIFIED); effect on the
+  device untested. QEMU: starts, no SELinux denials, logs "card ... not found" (no cards in QEMU).
+- **GRUB pitfalls** found in QEMU: `set default=debug>qemu` is a syntax error without quotes; submenus only see
+  `export`ed variables (entries inside got an empty boot UUID and the kernel panicked); `grub-script-check` now runs in
+  the build.
+- **Logger**: 10 snapshots by default (VERIFIED `SNAPSHOTS 10`), 60 with `gblog=full` (debug entries).
+- **Installer speed in QEMU**: emulated SDHCI writes 3-6 MB/s even with KVM; `mke2fs` discarded the whole data partition
+  first, which QEMU turns into writing zeros, so the installer formats with `nodiscard` (Android trims during idle).
+- **Shared work dir**: another session built `eve-attestation.raw` in `~/gb/gbrunch` at 23:19 and rebuilt the shared
+  kernel output; the kernel tree was unchanged (its diff equals kernel/pixelbook-kernel.patch). Builds of this repo now use
+  `~/gbp-work` (native.raw hard-linked).
