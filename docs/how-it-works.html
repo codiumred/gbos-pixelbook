@@ -213,7 +213,7 @@ footer { margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
     <a href="#boot">Boot, stage by stage</a>
     <a href="#audio">The audio freeze</a>
     <a href="#continue">Continue On</a>
-    <a href="#next">What's next</a>
+    <a href="#next">Internal install</a>
     <a href="#glossary">Glossary</a>
   </div>
 </nav>
@@ -221,7 +221,7 @@ footer { margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
 <div class="wrap">
 
 <header class="hero">
-  <div class="eyebrow">Project explainer · state as of v12, 18 Oct 2026</div>
+  <div class="eyebrow">Project explainer · state as of v13, 19 Oct 2026</div>
   <h1>Inside the Pixelbook Port</h1>
   <p class="lede">Google built Googlebook OS for laptops from 2024 onward. Your Pixelbook is from 2017. Getting one onto the other meant working at every level of the machine: the CPU, the kernel, the drivers, Android's own startup scripts and security rules. This page walks through each level, what Google ships, what we changed, and why.</p>
   <div class="facts">
@@ -390,55 +390,62 @@ footer { margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
 <section class="chapter" id="next">
   <header>
     <div class="eyebrow">Chapter 6</div>
-    <h2>What's next, and what each choice costs</h2>
-    <p class="muted">You already decided that ChromeOS can be wiped for the internal install. These are the remaining choices.</p>
+    <h2>From USB stick to internal disk</h2>
+    <p>v13 can install itself onto the Pixelbook's internal eMMC, with app data that survives restarts. Getting there took
+    four separate changes, each tested in a virtual machine with an emulated eMMC. <span class="tag i">not yet tested on the device</span></p>
   </header>
   <div class="deck">
     <div class="panel dec">
-      <span class="chip ours">next image</span>
-      <h3>Polish round (v13)</h3>
+      <span class="chip ours">which disk?</span>
+      <h3>Finding its own disk</h3>
       <ul>
-        <li>Audio on by default; test the headphone jack, mic and video volume</li>
-        <li>Remove the debug-only SELinux rules</li>
-        <li>Look at suspend: today a closed lid keeps the machine fully awake</li>
+        <li>Android finds its partitions on the disk whose <code>boot_a</code> partition has a given ID, passed by the boot menu</li>
+        <li>gbrunch hard-coded the stick's ID; now the menu reads the ID of whichever disk it was loaded from</li>
+        <li>A new GRUB loader reads the menu from its own disk, so a stick and an internal install never mix</li>
       </ul>
     </div>
     <div class="panel dec">
-      <span class="chip ours">big step</span>
-      <h3>Install to the internal eMMC</h3>
+      <span class="chip ours">early driver</span>
+      <h3>The eMMC driver, early</h3>
       <ul>
-        <li>Persistent data: the eMMC is far faster than the USB stick, so /data can live on disk</li>
-        <li>eMMC controller drivers must load during early boot</li>
-        <li>An updater that keeps your data, once we confirm encryption keys survive updates</li>
-        <li>Make a ChromeOS recovery USB first</li>
+        <li>The Pixelbook's eMMC controller needs Google's <code>sdhci-pci</code> module, stored on... the eMMC</li>
+        <li>So it now loads from the boot ramdisk, the same way the graphics driver does</li>
       </ul>
     </div>
     <div class="panel dec">
-      <span class="chip google">your call</span>
-      <h3>Boot firmware</h3>
+      <span class="chip ours">persistence</span>
+      <h3>Data on disk</h3>
       <ul>
-        <li><b>RW_LEGACY (now):</b> nothing to flash; CTRL+L at every boot; an accidental Space can trigger a wipe</li>
-        <li><b>Full UEFI ROM:</b> clean direct boot; needs write protection disabled; small brick risk, reversible with a backup</li>
+        <li>On the stick, app data stays in RAM (the stick is too slow); on the eMMC it lives on disk</li>
+        <li>A file the installer writes switches the mode at boot; the same image works for both</li>
+        <li>Checked over two boots: same files, same key store, no errors</li>
       </ul>
     </div>
     <div class="panel dec">
-      <span class="chip borrowed">sharing</span>
-      <h3>Public repo</h3>
+      <span class="chip ours">installer</span>
+      <h3>Install and update</h3>
       <ul>
-        <li>Scripts and patches only; every user downloads Google's image and builds locally</li>
-        <li>Audio firmware from the user's own ChromeOS install or recovery image</li>
-        <li>Credit gbrunch (MIT) and gbos-x86-port; kernel patches stay GPL-2.0</li>
-        <li>Scrub device identifiers from evidence files</li>
+        <li>Boot menu entry on the stick: type <code>ERASE</code>, it copies and verifies everything, then powers off</li>
+        <li>Fresh partition IDs; data partition grown to fill the disk; pristine state for partitions Android writes at run time</li>
+        <li>"Update the internal eMMC" replaces only the system and keeps apps and data</li>
+      </ul>
+    </div>
+    <div class="panel dec">
+      <span class="chip google">decided</span>
+      <h3>Firmware: full UEFI ROM</h3>
+      <ul>
+        <li>Write protection is disabled from ChromeOS with <code>gsctool</code>, no cable or screwdriver</li>
+        <li>So the firmware is flashed first, while ChromeOS is still installed, and its backup kept</li>
       </ul>
     </div>
     <div class="panel dec">
       <span class="chip ok">ideas</span>
-      <h3>Ways to make it better</h3>
+      <h3>Still open</h3>
       <ul>
-        <li>Fast paths for wide AES and GFNI hot spots (speed)</li>
+        <li>Suspend: test entries in the debug menu (S3 and s2idle) record a failed resume</li>
+        <li>Headphones and microphones: a small tool now sets the routing ChromeOS uses</li>
         <li>Send the audio-driver fix upstream to Linux</li>
-        <li>Suspend and resume, then battery life</li>
-        <li>Generalise to other Kaby/Amber Lake Chromebooks (Pixelbook Go)</li>
+        <li>Publish the cleaned-up repository</li>
       </ul>
     </div>
   </div>

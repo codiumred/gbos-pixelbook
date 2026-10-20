@@ -198,7 +198,7 @@ def rc(text):
         text = text.rstrip("\n") + "\n" + BACKLIGHT
     if os.environ.get("EVE_SUSPEND", "off") != "on" and "pixelbook: no system suspend" not in text:
         text = text.rstrip("\n") + "\n" + NOSUSPEND
-    if ovl and os.path.isfile(os.path.join(ovl, "vendor/bin/pbmixer")) and "pixelbook: headset and microphone routing" not in text:
+    if os.path.isfile(os.path.join(os.environ.get("EVE_OVERLAY_DIR", "/nonexistent"), "vendor/bin/pbmixer")) and "pixelbook: headset and microphone routing" not in text:
         text = text.rstrip("\n") + "\n" + PBMIXER
     if "pixelbook: no system suspend" in text and "pixelbook: suspend test" not in text:
         text = text.rstrip("\n") + "\n" + SUSPENDTEST      # after NOSUSPEND: same trigger, runs later
