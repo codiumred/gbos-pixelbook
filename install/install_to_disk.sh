@@ -151,13 +151,15 @@ while read -r num start size name; do
 done <<< "$PARTS"
 
 # --- 4. userdata -----------------------------------------------------------------------------------------------------
+# nodiscard: an erase of the whole partition first is slow on some media (QEMU writes zeros) and not needed: Android
+# trims free space during idle maintenance.
 if [ $UPDATE = 1 ]; then
 	say "keeping userdata ($(( TUD_SIZE / 2097152 )) GiB)"
 else
 say "formatting userdata ($(( TUD_SIZE / 2097152 )) GiB)"
 FEATS="has_journal,ext_attr,dir_index,filetype,extent,casefold,sparse_super,large_file,huge_file,uninit_bg,dir_nlink,extra_isize,quota,project,verity,^resize_inode,^flex_bg,^metadata_csum,^64bit,^orphan_file"
 mke2fs -F -q -t ext4 -b 4096 -I 512 -i 16384 -m 2 -J size=64 -O "$FEATS" \
-	-E "encoding=utf8,offset=$(( UD_START * 512 )),quotatype=usrquota:grpquota:prjquota" "$DST" $(( TUD_SIZE / 8 )) >> "$LOG" 2>&1 \
+	-E "encoding=utf8,offset=$(( UD_START * 512 )),quotatype=usrquota:grpquota:prjquota,nodiscard" "$DST" $(( TUD_SIZE / 8 )) >> "$LOG" 2>&1 \
 	|| die "mke2fs failed (see $LOG)"
 tune2fs -g 1065 "$DST?offset=$(( UD_START * 512 ))" > /dev/null 2>&1 || true	# Android's reserved-blocks group (best effort)
 fi
