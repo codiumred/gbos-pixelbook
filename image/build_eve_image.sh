@@ -136,9 +136,9 @@ set default=0
 insmod regexp
 insmod probe
 insmod smbios
-# The disk this menu was loaded from: \$root is e.g. (hd1,gpt12), so gb_disk is hd1. Android's first stage uses the
+# The disk this menu was loaded from: \$root is e.g. hd1,gpt12 (GRUB 2.14 prints no parentheses), so gb_disk is hd1. Android's first stage uses the
 # disk whose boot_a partition (GPT entry 13) has the UUID passed as androidboot.boot_part_uuid.
-regexp --set=1:gb_disk '^\(([^,]+),' "\$root"
+regexp --set=1:gb_disk '^[(]?([^,()]+),' "\$root"
 probe --set=gb_boot_uuid --part-uuid "(\$gb_disk,gpt13)"
 if [ -z "\$gb_boot_uuid" ]; then set gb_boot_uuid=$UUID0; fi
 # /data in RAM unless this disk was set up by the internal installer, which writes "set gb_data=disk" here
@@ -172,17 +172,13 @@ menuentry 'UEFI firmware settings' { fwsetup }
 EOF
 
 # GRUB itself: gbrunch's prebuilt loader finds its menu by a FAT volume serial, which would be ambiguous with the
-# USB stick and an internal install connected at once. This loader reads the menu from the partition it was itself
-# started from (\$cmdpath), so each disk always boots its own menu.
-cat > "$W/eve/grub-early.cfg" <<'EOF'
-insmod part_gpt
-insmod fat
-insmod regexp
-regexp --set=1:root '^(\([^)]+\))' "$cmdpath"
-configfile /EFI/GBRUNCH/grub.cfg
-EOF
-grub-mkstandalone -O x86_64-efi --fonts= --locales= --themes= --compress=xz -o "$W/eve/BOOTX64.EFI" \
-	"boot/grub/grub.cfg=$W/eve/grub-early.cfg"
+# USB stick and an internal install connected at once. This core image has the prefix /EFI/GBRUNCH without a device,
+# so GRUB fills in the partition it was itself loaded from and reads that partition's grub.cfg: each disk always
+# boots its own menu. (A grub-mkstandalone image does not work here: its $cmdpath is empty.) All modules the menu
+# uses are built in; nothing is loaded from the EFI partition.
+GRUB_MODS="part_gpt part_msdos fat normal configfile echo test regexp probe smbios search search_fs_uuid search_fs_file
+	search_label linux efi_gop all_video gfxterm font terminal serial efifwsetup reboot halt ls cat sleep"
+grub-mkimage -O x86_64-efi -p /EFI/GBRUNCH -o "$W/eve/BOOTX64.EFI" $GRUB_MODS
 
 # 5. image: copy of gbrunch's, with the three boot files replaced on the EFI partition
 rm -f "$W/eve.raw"
@@ -315,6 +311,17 @@ mcopy -o -i "$W/eve.raw@@$OFF" "$O/arch/x86/boot/bzImage" ::/EFI/GBRUNCH/kernel
 mcopy -o -i "$W/eve.raw@@$OFF" "$W/eve-initrd.gz" ::/EFI/GBRUNCH/initrd.gz
 mcopy -o -i "$W/eve.raw@@$OFF" "$W/eve/grub.cfg" ::/EFI/GBRUNCH/grub.cfg
 mcopy -o -i "$W/eve.raw@@$OFF" "$W/eve/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+# Pristine copies of the two runtime partitions that are not all zeros (an empty ext4 /metadata and an empty FAT log
+# partition, ~100 KB compressed), taken from the freshly assembled image: the installer (install/install_to_disk.sh)
+# writes these instead of whatever state a used USB stick has accumulated.
+mkdir -p "$W/eve/pristine"
+for p in metadata GBLOG; do
+	read -r ps pz < <(sfdisk -d "$W/native.raw" | sed -nE "s/.*start= *([0-9]+), size= *([0-9]+),.*name=\"$p\".*/\1 \2/p")
+	dd if="$W/native.raw" bs=512 skip="$ps" count="$pz" status=none | gzip -9n > "$W/eve/pristine/$p.img.gz"
+done
+mmd -D s -i "$W/eve.raw@@$OFF" ::/EFI/GBRUNCH/pristine 2>/dev/null || true
+mcopy -o -i "$W/eve.raw@@$OFF" "$W/eve/pristine/metadata.img.gz" "$W/eve/pristine/GBLOG.img.gz" ::/EFI/GBRUNCH/pristine/
+ls -la "$W/eve/pristine"
 mdir -i "$W/eve.raw@@$OFF" ::/EFI/GBRUNCH | sed -n 4,12p
 ls -la "$W/eve.raw"
 sha256sum "$O/arch/x86/boot/bzImage" "$W/eve-initrd.gz" | sed "s#$W/##; s#$O/##" | tee "$W/eve/boot-files.sha256"

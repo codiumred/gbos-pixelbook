@@ -22,7 +22,7 @@ mkdir -p "$WORK" "$GW"
 
 missing=""
 for t in git curl python3 make gcc clang ld.lld llvm-ar bc flex bison pahole cpio kmod lz4 zstd \
-	dump.erofs mkfs.erofs debugfs sfdisk mcopy setfattr qemu-system-x86_64 qemu-img grub-mkstandalone rustc bindgen; do
+	dump.erofs mkfs.erofs debugfs sfdisk mcopy setfattr qemu-system-x86_64 qemu-img grub-mkimage rustc bindgen; do
 	command -v "$t" >/dev/null || { [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"; command -v "$t" >/dev/null; } || missing="$missing $t"
 done
 if [ -n "$missing" ]; then
