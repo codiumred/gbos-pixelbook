@@ -24,7 +24,9 @@ copy_with_libs() {	# <binary path> <name in /bin>
 }
 for t in bash sfdisk wipefs lsblk blkid mke2fs tune2fs mcopy mmd dd sha256sum gzip readlink stat sort seq tr id date \
 	cmp cut sync awk sed grep blockdev rm cat wc head tail tee; do
-	p="$(command -v "$t")" || { echo "missing $t"; exit 1; }
+	# Ubuntu 25.10+ ships the Rust coreutils, whose every tool is a copy of one 11 MB binary; prefer the GNU
+	# versions (installed as gnu<name>) when present, they are about 100 KB each.
+	p="$(command -v "gnu$t" || command -v "$t")" || { echo "missing $t"; exit 1; }
 	copy_with_libs "$p" "$t"
 done
 [ -f /etc/mke2fs.conf ] && cp /etc/mke2fs.conf "$R/etc/"

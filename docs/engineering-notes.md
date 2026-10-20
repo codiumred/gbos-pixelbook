@@ -932,3 +932,34 @@ bind-mounts it over `/vendor/lib/modules/snd-soc-avs.ko` in gbrunch's early-init
 Other repos (2026-10-17): OpenBook (Zen 5, AOSP-built) also needed the system DMA-BUF heap; googlebook-continue-on and
 googlebook-projects say Continue On needs an Android 17 phone and offer scrcpy mirroring instead; googlebook-anywhere (Alder Lake) uses
 software KeyMint too. None addresses attestation.
+
+## 25. v13: internal-disk support, persistent data, installer (2026-10-19, QEMU only so far)
+
+- **Boot disk at boot time** (VERIFIED in QEMU). Android's first stage picks the disk whose `boot_a` partition has the
+  PARTUUID in `androidboot.boot_part_uuid`; gbrunch's command line hard-coded the stick's. The menu now computes it:
+  GRUB 2.14 prints `$root` as `hd0,gpt12` (no parentheses), `regexp '^[(]?([^,()]+),'` gives the disk, and
+  `probe --part-uuid (hdN,gpt13)` the UUID; a fresh-UUID eMMC install booted with its own `5d7b1863-...`.
+- **Own GRUB loader.** gbrunch's prebuilt `BOOTX64.EFI` finds its menu by FAT volume serial, which a stick and an
+  internal copy share. A `grub-mkstandalone` image does not help: its `$cmdpath` is empty (VERIFIED). A `grub-mkimage`
+  core with prefix `/EFI/GBRUNCH` and no device works: GRUB fills in the partition it was loaded from (VERIFIED, USB and
+  eMMC under OVMF).
+- **eMMC driver in the first stage.** MMC core, block and SDHCI are built in, but the Pixelbook's controller (8086:9d2b)
+  needs Google's `sdhci-pci.ko` (+ `cqhci.ko`, `sdhci-uhs2.ko`) from vendor_dlkm, which on an internal install is on the
+  eMMC itself. The three are now in the initrd's first-stage list. QEMU 10.2 `-device sdhci-pci -device emmc`: first
+  stage loads them, `mmcblk0` shows 35 partitions, all mounts succeed, boot reaches zygote and SurfaceFlinger.
+- **/data mode at boot.** `androidboot.gbdata=disk` bind-mounts `/oem/fstab.android-desktop.disk` (gbrunch's fstab
+  without the tmpfs line) over the RAM variant in an early-init action placed before gbrunch's own (which binds the
+  fstab into /vendor/etc). The installer sets it through `/EFI/GBRUNCH/install.cfg`. Persistence VERIFIED over two
+  boots: same filesystem (creation time), same inodes, keystore `persistent.sqlite` kept, no keystore/KeyMint errors.
+  gbrunch's userdata has no `fileencryption=`, so /data is not file-encrypted.
+- **Installer** (`install/install_to_disk.sh`): same GPT with fresh UUIDs and userdata to the end of the disk; copies
+  all partitions except userdata/userdata_old/GBVENDOR_OLD; run-time partitions get pristine state (misc, both
+  desktop_security stores and frp_persist are all-zero in the assembled image; metadata is an empty ext4 and GBLOG an
+  empty FAT, both stored gzip'ed on the ESP, 66 KB and 261 KB); mke2fs like Android's first boot; read-back
+  verification. File-target run: 1 min 46 s for a 64 GiB target. `--update` keeps table, data and run-time state.
+- **Installer boot entry**: Google's kernel has no text console (no VT/fbcon), so GRUB shows the explanation and reads
+  the confirmation (`read`), then boots our kernel with `installer.gz` (busybox + the build host's bash, util-linux,
+  e2fsprogs, mtools, GNU coreutils; Ubuntu 26.04's Rust coreutils are an 11 MB binary per tool, 189 MB in total, so
+  the `gnu*` builds are used: 10 MB compressed). Result and log go to the stick's ESP; the stick's menu shows them.
+- Audio is on by default again (real `audio_config.xml` in vendor); `androidboot.gbaudio=0` (safe-mode entry)
+  bind-mounts the placeholder. Debug SELinux rules for camera/ALSA/backlight removed; pstore read kept for the logger.
