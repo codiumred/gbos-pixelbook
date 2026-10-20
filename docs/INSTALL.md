@@ -61,12 +61,15 @@ Plug the stick in, power on, then:
 - RW_LEGACY: press **CTRL+L** at the developer-mode screen, then pick the USB stick in the boot menu (Esc).
 - Full ROM: press **Esc** at the logo for the boot menu and pick the USB stick.
 
-GRUB shows three entries:
+The boot menu:
 
-1. **Googlebook OS on Pixelbook** - the normal boot.
-2. **Audio crash test** - turns on every lockup detector and makes the system reboot itself after a freeze, so the
-   kernel's last messages survive in RAM (ramoops) for the next boot's logs. Only for debugging.
-3. **Serial console (QEMU)** - for virtual machine tests.
+1. **Googlebook OS** - the normal boot.
+2. **Googlebook OS, safe mode: internal audio off** - leaves the sound cards alone; a way back if audio ever breaks.
+3. **Debug: crash capture** - turns on every lockup detector and makes the system reboot itself after a freeze, so the
+   kernel's last messages survive in RAM (ramoops) for the next boot's logs.
+4. **Serial console (QEMU)** - for virtual machine tests.
+5. **Install to the internal eMMC** - only on the USB stick, see section 5.
+6. **UEFI firmware settings**.
 
 The screen stays black until Android draws, about a minute. The first boot and setup take around 20 minutes on a
 USB stick: app data is in RAM, so Android compiles apps on every boot and nothing persists between boots. That is
@@ -80,5 +83,28 @@ records keys that are not letters, digits or punctuation.
 
 ## 5. Installing to the internal eMMC
 
-Not available yet. It is the next planned step: persistent app data on the internal disk and an updater that keeps
-your data. Until then the USB stick is the way to run it.
+This replaces ChromeOS. App data then lives on the internal storage (eMMC) and survives restarts; the USB stick can
+be kept as a recovery and test disk.
+
+Before you start: flash the full UEFI ROM (section 1) if you want the Pixelbook to start Googlebook OS without the
+developer-mode screen, and keep a copy of anything you need from ChromeOS.
+
+1. Boot the USB stick and choose **Install to the internal eMMC**.
+2. Read the screen, type `ERASE` and press Enter. Keep the charger connected.
+3. The install takes 10 to 20 minutes. The screen does not change while it runs: Google's kernel has no text console,
+   so the installer works silently in the background.
+4. **The Pixelbook turns itself off when it succeeds.** Remove the USB stick and turn it on: it starts from the eMMC.
+   With RW_LEGACY firmware press CTRL+L as before; with the full ROM it boots directly (or pick the eMMC with Esc).
+5. If it restarts instead of turning off, the install failed. Start the USB stick again: its menu shows the result and
+   the last log lines first, and the full log is on the stick's EFI partition (`/EFI/GBRUNCH/install-log.txt`).
+
+What the installer does (`install/install_to_disk.sh`): it writes the stick's partition table to the eMMC with fresh
+partition IDs and the data partition grown to fill the disk, copies every system partition and checks each copy
+against the stick, gives the partitions that Android writes at run time (metadata, security stores, logs) their
+pristine contents rather than the stick's, formats the data partition, and marks the eMMC's boot menu to keep /data
+on disk. The same script also runs from any Linux live system: `sudo install/install_to_disk.sh <stick> /dev/mmcblk0`.
+
+The first start from the eMMC sets up Android like a new device (about 20 minutes). After that, starts are much
+faster than from the stick because apps stay compiled.
+
+Updating an internal install while keeping its data is not automated yet.

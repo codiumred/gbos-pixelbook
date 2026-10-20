@@ -52,6 +52,7 @@ for m in $GMODS modules.dep; do
 	dump.erofs --offset="$DLKM0" --cat --path="/lib/modules/$m" "$W/native.raw" > "$W/eve/gmods/$m"
 	[ -s "$W/eve/gmods/$m" ] || { echo "vendor_dlkm has no $m"; exit 1; }
 done
+bash "$HERE/install/build_installer_initramfs.sh" "$W/eve/installer.gz" "$W/eve/gmods"
 python3 - "$W" "$REL" "$MODS" "$FW" "$GMODS" <<'PY'
 import gzip, pathlib, sys
 W, rel, mods, fws = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3].split(), sys.argv[4].split()
@@ -143,6 +144,13 @@ probe --set=gb_boot_uuid --part-uuid "(\$gb_disk,gpt13)"
 if [ -z "\$gb_boot_uuid" ]; then set gb_boot_uuid=$UUID0; fi
 # /data in RAM unless this disk was set up by the internal installer, which writes "set gb_data=disk" here
 set gb_data=ram
+# result of the last run of the internal installer started from this USB stick
+if [ -f /EFI/GBRUNCH/install-result.txt ]; then
+ cat /EFI/GBRUNCH/install-result.txt
+ echo
+ echo 'The menu follows in 15 seconds (any key: now).'
+ sleep --interruptible 15
+fi
 if [ -f /EFI/GBRUNCH/install.cfg ]; then source /EFI/GBRUNCH/install.cfg; fi
 smbios --type=1 --get-string=4 --set=system_vendor
 if [ "\$system_vendor" = "QEMU" ]; then
@@ -168,6 +176,46 @@ menuentry 'Serial console and emulation profiling (QEMU)' {
  linux /EFI/GBRUNCH/kernel $DEV androidboot.boot_part_uuid=\$gb_boot_uuid androidboot.gbdata=\$gb_data console=ttyS0,115200 earlycon=uart8250,io,0x3f8,115200 isa_emu=profile
  initrd /EFI/GBRUNCH/initrd.gz
 }
+if [ "\$gb_data" = ram ]; then
+menuentry 'Install to the internal eMMC (erases ChromeOS and everything on it)' {
+ echo 'This copies Googlebook OS from this USB stick to the Pixelbook internal storage (eMMC).'
+ echo 'EVERYTHING on the internal storage is erased, including ChromeOS and its data.'
+ echo 'App data then lives on the internal storage and survives restarts.'
+ echo
+ echo 'The install takes about 10 to 20 minutes and the screen does not change while it runs.'
+ echo 'Keep the charger connected. When it is done the Pixelbook turns itself off:'
+ echo 'then remove the USB stick and turn it on. If it restarts instead, the next start'
+ echo 'of this USB stick shows what went wrong.'
+ echo
+ echo -n 'Type ERASE and press Enter to start, or press Enter to go back: '
+ read gb_answer
+ if [ "\$gb_answer" = ERASE ]; then
+  echo
+  echo 'Installing. Do not turn the Pixelbook off.'
+  linux /EFI/GBRUNCH/kernel rdinit=/init androidboot.boot_part_uuid=\$gb_boot_uuid loglevel=3
+  initrd /EFI/GBRUNCH/installer.gz
+  boot
+ fi
+}
+menuentry 'Update the internal eMMC from this USB stick (keeps apps and data)' {
+ echo 'This replaces the system on the internal storage with the one on this USB stick.'
+ echo 'Apps, accounts, settings and files on the internal storage are kept.'
+ echo 'It only works on an internal install made by this installer (same partition layout).'
+ echo
+ echo 'It takes about 10 minutes and the screen does not change while it runs.'
+ echo 'Keep the charger connected. When it is done the Pixelbook turns itself off.'
+ echo
+ echo -n 'Type UPDATE and press Enter to start, or press Enter to go back: '
+ read gb_answer
+ if [ "\$gb_answer" = UPDATE ]; then
+  echo
+  echo 'Updating. Do not turn the Pixelbook off.'
+  linux /EFI/GBRUNCH/kernel rdinit=/init androidboot.boot_part_uuid=\$gb_boot_uuid gb_install=update loglevel=3
+  initrd /EFI/GBRUNCH/installer.gz
+  boot
+ fi
+}
+fi
 menuentry 'UEFI firmware settings' { fwsetup }
 EOF
 
@@ -177,7 +225,7 @@ EOF
 # boots its own menu. (A grub-mkstandalone image does not work here: its $cmdpath is empty.) All modules the menu
 # uses are built in; nothing is loaded from the EFI partition.
 GRUB_MODS="part_gpt part_msdos fat normal configfile echo test regexp probe smbios search search_fs_uuid search_fs_file
-	search_label linux efi_gop all_video gfxterm font terminal serial efifwsetup reboot halt ls cat sleep"
+	search_label linux efi_gop all_video gfxterm font terminal serial efifwsetup reboot halt ls cat sleep read"
 grub-mkimage -O x86_64-efi -p /EFI/GBRUNCH -o "$W/eve/BOOTX64.EFI" $GRUB_MODS
 
 # 5. image: copy of gbrunch's, with the three boot files replaced on the EFI partition
@@ -311,6 +359,7 @@ mcopy -o -i "$W/eve.raw@@$OFF" "$O/arch/x86/boot/bzImage" ::/EFI/GBRUNCH/kernel
 mcopy -o -i "$W/eve.raw@@$OFF" "$W/eve-initrd.gz" ::/EFI/GBRUNCH/initrd.gz
 mcopy -o -i "$W/eve.raw@@$OFF" "$W/eve/grub.cfg" ::/EFI/GBRUNCH/grub.cfg
 mcopy -o -i "$W/eve.raw@@$OFF" "$W/eve/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+mcopy -o -i "$W/eve.raw@@$OFF" "$W/eve/installer.gz" ::/EFI/GBRUNCH/installer.gz
 # Pristine copies of the two runtime partitions that are not all zeros (an empty ext4 /metadata and an empty FAT log
 # partition, ~100 KB compressed), taken from the freshly assembled image: the installer (install/install_to_disk.sh)
 # writes these instead of whatever state a used USB stick has accumulated.
