@@ -155,6 +155,9 @@ if [ -f /EFI/GBRUNCH/install-result.txt ]; then
  sleep --interruptible 15
 fi
 if [ -f /EFI/GBRUNCH/install.cfg ]; then source /EFI/GBRUNCH/install.cfg; fi
+# submenus start a new environment that only sees exported variables
+export gb_boot_uuid
+export gb_data
 smbios --type=1 --get-string=4 --set=system_vendor
 if [ "\$system_vendor" = "QEMU" ]; then
  serial --unit=0 --speed=115200
