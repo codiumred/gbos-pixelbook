@@ -159,7 +159,7 @@ smbios --type=1 --get-string=4 --set=system_vendor
 if [ "\$system_vendor" = "QEMU" ]; then
  serial --unit=0 --speed=115200
  terminal_output console serial
- set default=debug>qemu
+ set default="debug>qemu"
 fi
 menuentry 'Googlebook OS' {
  echo 'Starting. The screen stays black until Android draws (about a minute).'
@@ -235,6 +235,8 @@ submenu 'Debug and test options' --id debug {
 }
 menuentry 'UEFI firmware settings' { fwsetup }
 EOF
+
+grub-script-check "$W/eve/grub.cfg" || { echo "grub.cfg has a syntax error"; exit 1; }
 
 # GRUB itself: gbrunch's prebuilt loader finds its menu by a FAT volume serial, which would be ambiguous with the
 # USB stick and an internal install connected at once. This core image has the prefix /EFI/GBRUNCH without a device,
@@ -321,6 +323,10 @@ ARGS+=("usr/keylayout/AT_Translated_Set_2_keyboard.kl=$W/eve/vcfg/AT_Translated_
 
 DONOR="${DONOR_SUPER:-$IN/donor/super.raw}"
 rm -rf "$W/eve/oemfiles"; mkdir -p "$W/eve/oemfiles/system/lib64" "$W/eve/oemfiles/vendor/etc" "$W/eve/oemfiles/vendor/lib/modules"
+# headset and microphone routing on the two cards dras does not configure (audio/pbmixer.c, run once at boot)
+mkdir -p "$W/eve/oemfiles/vendor/bin"
+gcc -O2 -Wall -static -o "$W/eve/oemfiles/vendor/bin/pbmixer" "$HERE/audio/pbmixer.c"
+install -m 0644 "$HERE/audio/pbmixer.conf" "$W/eve/oemfiles/vendor/etc/pbmixer.conf"
 # audio safe mode: this placeholder is bind-mounted over the real config with androidboot.gbaudio=0 (patch_oem.sh)
 install -m 0644 "$HERE/audio/audio_config.off.xml" "$W/eve/oemfiles/vendor/etc/audio_config.xml"
 # Fixed AVS audio DSP driver (array overrun in avs_path_set_constraint crashed the machine when the speaker opened;

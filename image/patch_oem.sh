@@ -151,6 +151,23 @@ on boot
     write /sys/power/wake_lock pixelbook_no_suspend
 """
 
+PBMIXER = """
+# --- pixelbook: headset and microphone routing. Google's dras HAL applies mixer paths only to the primary (speaker)
+# card; the headset codec (avsrt5663) and the internal microphones (avsrt5514) are separate cards whose routing
+# switches start off. pbmixer (audio/pbmixer.c) sets them once, to ChromeOS's values (audio/pbmixer.conf). It runs in
+# the audio HAL's SELinux domain and group, which may open the sound devices, and logs to the kernel log. ---
+service pbmixer /oem/overlay/vendor/bin/pbmixer /oem/overlay/vendor/etc/pbmixer.conf
+    user audioserver
+    group audio
+    seclabel u:r:hal_audio_default:s0
+    stdio_to_kmsg
+    oneshot
+    disabled
+
+on property:init.svc.vendor.audio-hal-aidl=running
+    start pbmixer
+"""
+
 SUSPENDTEST = """
 # --- pixelbook: suspend test. androidboot.gbsuspend=1 (GRUB's suspend-test entries) releases the keep-awake lock
 # taken above, so closing the lid suspends the machine again. Those entries also choose the sleep state
@@ -181,6 +198,8 @@ def rc(text):
         text = text.rstrip("\n") + "\n" + BACKLIGHT
     if os.environ.get("EVE_SUSPEND", "off") != "on" and "pixelbook: no system suspend" not in text:
         text = text.rstrip("\n") + "\n" + NOSUSPEND
+    if ovl and os.path.isfile(os.path.join(ovl, "vendor/bin/pbmixer")) and "pixelbook: headset and microphone routing" not in text:
+        text = text.rstrip("\n") + "\n" + PBMIXER
     if "pixelbook: no system suspend" in text and "pixelbook: suspend test" not in text:
         text = text.rstrip("\n") + "\n" + SUSPENDTEST      # after NOSUSPEND: same trigger, runs later
     if "pixelbook: Google's legacy camera provider" not in text:
@@ -340,10 +359,12 @@ if [ -n "${EVE_OVERLAY_DIR:-}" ] && [ -d "$EVE_OVERLAY_DIR" ]; then
 	(cd "$EVE_OVERLAY_DIR" && find . -type f | sort) | while read -r f; do
 		f="${f#./}"
 		mkdir -p "$M/overlay/$(dirname "$f")"
-		install -m 0644 -o 0 -g 0 "$EVE_OVERLAY_DIR/$f" "$M/overlay/$f"
+		case "$f" in vendor/bin/*) mode=0755 ;; *) mode=0644 ;; esac
+		install -m $mode -o 0 -g 0 "$EVE_OVERLAY_DIR/$f" "$M/overlay/$f"
 		case "$f" in
 			system/lib64/*.so) lbl="u:object_r:system_lib_file:s0" ;;
-			vendor/etc/*.xml) lbl="u:object_r:vendor_configs_file:s0" ;;
+			vendor/etc/*.xml|vendor/etc/*.conf) lbl="u:object_r:vendor_configs_file:s0" ;;
+			vendor/bin/pbmixer) lbl="u:object_r:hal_audio_default_exec:s0" ;;	# runs in the audio HAL's domain
 			vendor/lib/modules/*.ko) lbl="u:object_r:vendor_kernel_modules:s0" ;;
 			*) echo "no label rule for overlay file $f"; exit 1 ;;
 		esac

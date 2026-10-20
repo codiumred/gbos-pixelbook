@@ -16,7 +16,9 @@ mcopy -n -i "$T/stick.raw@@$OFF" ::/EFI/GBRUNCH/installer.gz "$T/installer.gz"
 UUID=$(sfdisk -d "$T/stick.raw" | sed -nE 's/.*uuid=([0-9A-F-]+), name="boot_a".*/\1/p' | tr 'A-Z' 'a-z')
 EXTRA=""; [ "$MODE" = update ] && EXTRA="gb_install=update"
 start=$(date +%s)
-timeout "${SECS:-5400}" qemu-system-x86_64 -machine q35 -accel tcg,thread=multi -cpu max -smp 4 -m 2048 \
+ACCEL="tcg,thread=multi"; CPU=max
+[ -w /dev/kvm ] && { ACCEL=kvm; CPU=host; }	# the installer itself needs no Kaby Lake CPU model
+timeout "${SECS:-5400}" qemu-system-x86_64 -machine q35 -accel "$ACCEL" -cpu "$CPU" -smp 4 -m 2048 \
 	-display none -vga none -serial stdio -monitor none -no-reboot -nic none \
 	-kernel "$T/kernel" -initrd "$T/installer.gz" \
 	-append "rdinit=/init androidboot.boot_part_uuid=$UUID $EXTRA 8250.nr_uarts=4 console=ttyS0,115200 loglevel=4" \

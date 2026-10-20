@@ -14,7 +14,7 @@ Packages (Ubuntu):
 ```sh
 sudo apt-get install -y build-essential clang lld llvm bc bison flex libelf-dev libssl-dev libdw-dev zlib1g-dev \
   dwarves cpio kmod lz4 zstd erofs-utils e2fsprogs fdisk mtools attr python3 git curl rsync ca-certificates \
-  libclang-dev pkg-config qemu-system-x86 qemu-utils nasm grub-common grub-efi-amd64-bin
+  libclang-dev pkg-config qemu-system-x86 qemu-utils nasm grub-common grub-efi-amd64-bin busybox-static
 ```
 
 The kernel contains Rust code, so it also needs the Rust version Google built it with:
