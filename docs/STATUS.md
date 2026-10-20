@@ -36,7 +36,7 @@ tested on a Pixelbook.
 
 ## Not tested yet
 
-Headphone jack, microphones, HDMI audio over USB-C, stylus, external displays, battery life, suspend with the full
+Headphone jack and microphones (v13 switches on their routing the way ChromeOS does, with `audio/pbmixer.conf`), HDMI audio over USB-C, stylus, external displays, battery life, suspend with the full
 UEFI ROM (the suspend-test entries are there for it).
 
 ## Performance

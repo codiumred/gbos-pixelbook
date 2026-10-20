@@ -16,6 +16,8 @@ partitions. It builds on [gbrunch](https://github.com/danbyumagic/gbrunch), whic
 Working on the device: boot to desktop, Google sign-in and Play Store, GPU rendering (i915 + Vulkan), Wi-Fi,
 Bluetooth, touchscreen, touchpad, keyboard with the top-row keys, screen brightness, webcam, internal speakers.
 
+Internal install with persistent data: available in v13, tested in a virtual machine, not yet on a Pixelbook.
+
 Not working, or limits: Continue On and phone-assisted setup (they need Google-registered hardware attestation keys,
 see [docs/STATUS.md](docs/STATUS.md)); suspend (lid close keeps the machine awake); no over-the-air updates.
 It is slower than ChromeOS because missing CPU instructions are emulated by the kernel.
@@ -40,8 +42,12 @@ The engineering log with every finding and its evidence is [docs/engineering-not
 ## Getting started
 
 1. **Build** the image on a Linux or Windows (WSL2) PC: [docs/BUILD.md](docs/BUILD.md). About 10 GB of downloads,
-   130 GB of work space, an hour or more.
-2. **Boot it from a 32 GB USB stick** on the Pixelbook: [docs/INSTALL.md](docs/INSTALL.md).
+   130 GB of work space, an hour or more. If you plan to replace ChromeOS, first copy the Pixelbook's audio firmware
+   from it (docs/BUILD.md explains how).
+2. **Firmware**: MrChromebox's RW_LEGACY or full UEFI ROM, installed from ChromeOS ([docs/INSTALL.md](docs/INSTALL.md)).
+3. **Boot it from a 32 GB USB stick** to try it: app data stays in RAM, every boot is a fresh device.
+4. **Install it to the internal eMMC** from the stick's boot menu, for a laptop that keeps its apps and data
+   ([docs/INSTALL.md](docs/INSTALL.md), section 5). Later versions update it in place from the stick.
 
 ## Repository layout
 
