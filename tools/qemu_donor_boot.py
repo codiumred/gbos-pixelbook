@@ -7,12 +7,12 @@ GFNI/AVX-VNNI run on a CPU model that also lacks them? No Google recovery bits a
 Inputs:  donor_cuttlefish/x/{super.raw,vbmeta*.img,boot.img,...} and donor_cuttlefish/x/inspect/*
 Outputs: build/donor-boot/disk.img (GPT, sparse), evidence/<name>.log + .json
 """
-import argparse, binascii, hashlib, json, pathlib, struct, subprocess, sys, time, uuid, zipfile
+import argparse, binascii, hashlib, json, os, pathlib, struct, subprocess, sys, time, uuid, zipfile
 
 R = pathlib.Path(__file__).resolve().parents[1]
 X = R / "donor_cuttlefish/x"
 INS = X / "inspect"
-QEMU = pathlib.Path(r"C:\Users\you\qemu")
+QEMU = pathlib.Path(os.environ.get("QEMU_DIR", r"C:\Program Files\qemu"))
 MiB = 1 << 20
 ZIP = R / "donor_cuttlefish/aosp_cf_img-16373615.zip"
 

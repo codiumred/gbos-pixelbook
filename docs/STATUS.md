@@ -1,12 +1,12 @@
 # Status
 
-Tested on one Pixelbook (2017, i5-7Y57, 8 GB, board EVE) with Googlebook OS build 16452207 (Lenovo "ruby"
-recovery, Android 17). "Verified" means seen on the device or in its logs.
+Tested on one Pixelbook (2017, i5-7Y57, 8 GB, board EVE) with Googlebook OS builds 16452207 and 16658739 (Lenovo
+"ruby" recovery, Android 17). "Verified" means seen on the device or in its logs.
 
 **Current build.** This repository now builds Google's newer build 16658739 (CL3B.260622.276.R4, Android 17 SDK 37.1,
-security patch 2026-10-01). Google's setup needs this build. It has the same kernel as the older build. In a virtual machine
-it starts like the older build: no module problems, no illegal-instruction faults and the same speed-ups. A Pixelbook test
-of the new build is still to do.
+security patch 2026-10-01). Google's setup needs this build. It has the same kernel as the older build. On the
+Pixelbook, the author ran it from a USB stick and from the internal storage, finished Google's setup and uses it as normal.
+The detailed re-check of each item in the table below (sound, camera and so on) was done on the older build.
 
 ## Works (verified on the device)
 
@@ -36,8 +36,8 @@ of the new build is still to do.
 ## Installing to the internal eMMC
 
 Available (see [INSTALL.md](INSTALL.md#b-install-to-the-pixelbook-erases-chromeos)), with persistent app data. Tested in QEMU with an emulated eMMC behind an SDHCI
-controller: the installer, the boot from the eMMC, /data on disk and its persistence across a second boot. Not yet
-tested on a Pixelbook.
+controller: the installer, the boot from the eMMC, /data on disk and its persistence across a second boot. The install
+also worked on a Pixelbook (build 16658739).
 
 ## Not tested yet
 

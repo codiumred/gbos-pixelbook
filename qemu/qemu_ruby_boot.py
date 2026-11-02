@@ -9,11 +9,11 @@ The recovery image is opened as a disposable snapshot; nothing is written to it.
   python qemu/qemu_ruby_boot.py --seconds 60 --name ruby-stock        (stock kernel: control)
 Cmdline and ramdisk composition follow gbrunch tools/run_android_probe.py.
 """
-import argparse, gzip, hashlib, json, pathlib, re, subprocess, time
+import argparse, gzip, hashlib, json, os, pathlib, re, subprocess, time
 
 R = pathlib.Path(__file__).resolve().parents[1]
 I = R / "recovery_ruby/inspect_recovery"
-Q = pathlib.Path(r"C:\Users\you\qemu")
+Q = pathlib.Path(os.environ.get("QEMU_DIR", r"C:\Program Files\qemu"))
 
 
 def newc(ino, name, data, mode=0o100644):

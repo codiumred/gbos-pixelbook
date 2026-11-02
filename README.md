@@ -8,7 +8,7 @@
 <p align="center">
   <img alt="Device" src="https://img.shields.io/badge/device-Pixelbook%202017%20(EVE)-blue">
   <img alt="OS" src="https://img.shields.io/badge/OS-Googlebook%20OS%20(Android%2017)-green">
-  <img alt="Status" src="https://img.shields.io/badge/status-works%20from%20USB%20%7C%20internal%20install%20untested-orange">
+  <img alt="Status" src="https://img.shields.io/badge/status-works%20from%20USB%20and%20internal%20eMMC-brightgreen">
   <img alt="Licence" src="https://img.shields.io/badge/licence-MIT%20%2B%20GPL--2.0-lightgrey">
 </p>
 
@@ -47,9 +47,9 @@ It builds on [gbrunch](https://github.com/danbyumagic/gbrunch), which runs Googl
 It is slower than ChromeOS. Details: [docs/STATUS.md](docs/STATUS.md).
 
 > [!NOTE]
-> The table shows what works on one Pixelbook with Google's June 2026 build (16452207). Google released a newer build
-> (16658739), and its setup needs it. This repository builds the newer one. It starts correctly in a virtual machine.
-> A test on a Pixelbook is still to do.
+> This repository builds Google's build 16658739 (October 2026). Its setup, from a USB stick and from the internal
+> storage, was tested on one Pixelbook. The table was made with the older June 2026 build (16452207). Items in it were
+> not all checked again on the new build.
 
 ## Pick your path
 

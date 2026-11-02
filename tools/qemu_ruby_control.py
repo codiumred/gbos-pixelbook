@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Control for qemu_donor_boot.py: boot Google's unmodified ruby kernel+ramdisk on the same Kaby Lake-class
 CPU model. Expect first-stage init to die on GFNI (#UD). Evidence only; no disk is written (snapshot)."""
-import gzip, pathlib, subprocess, sys
+import gzip, os, pathlib, subprocess, sys
 R = pathlib.Path(__file__).resolve().parents[1]
-I = R / "recovery_ruby/inspect_recovery"; Q = pathlib.Path(r"C:\Users\you\qemu")
+I = R / "recovery_ruby/inspect_recovery"; Q = pathlib.Path(os.environ.get("QEMU_DIR", r"C:\Program Files\qemu"))
 cpu = sys.argv[1] if len(sys.argv) > 1 else "Skylake-Client-noTSX-IBRS"
 cpio = (I/"vendor_boot_a/fragment-0-platform.cpio").read_bytes() + (I/"vendor_boot_a/fragment-2-dlkm.cpio").read_bytes() + (I/"init_boot_a/ramdisk.cpio").read_bytes()
 out = R/"build/ruby-control"; out.mkdir(parents=True, exist_ok=True)

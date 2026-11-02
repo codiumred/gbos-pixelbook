@@ -147,7 +147,7 @@ Remaining blockers are unchanged: GPU (kernel i915 + KBL firmware), then device 
 
 ## 11. Path A smoke test: donor userland on a Kaby Lake-class CPU model (2026-10-13)
 
-Tooling: QEMU 11.1.0 (stock, installed under `C:/Users/you/qemu`), `tools/qemu_donor_boot.py`, `tools/qemu_ruby_control.py`.
+Tooling: QEMU 11.1.0 (stock, Windows build; the scripts find it through the `QEMU_DIR` variable), `tools/qemu_donor_boot.py`, `tools/qemu_ruby_control.py`.
 Emulation is used purely as an ISA oracle (TCG `-cpu Skylake-Client-noTSX-IBRS` rejects GFNI/VNNI/AVX-512 the way
 the Pixelbook's CPU would). The end goal remains bare metal.
 
@@ -861,7 +861,7 @@ v9 image: `build/pixelbook/pixelbook-googlebook-eve.img`, SHA-256 `37e7eaacf7281
 ## 23. v9 on the device, first live session over adb (2026-10-17)
 Owner report: brightness works (DPCD backlight confirmed), but the panel flashes to full brightness for a moment on brightness-key presses;
 `update_usb.ps1` refused the stick ("does not hold the base image"), so v9 was flashed with Rufus. Wireless debugging enabled: adb from the
-Windows host works (`C:\Users\you\platform-tools\adb.exe`, paired once with the 6-digit code; mDNS shows `_adb-tls-connect` at
+Windows host works (`adb.exe` from the platform-tools, paired once with the 6-digit code; mDNS shows `_adb-tls-connect` at
 <device-ip>:<port>). Pushing small scripts to `/data/local/tmp` and running them avoids PowerShell/adb quoting problems. The shell user
 reads `/oem/logs` (the logger's GBLOG partition) directly, so boot-time logs are available even after logcat rotated.
 
