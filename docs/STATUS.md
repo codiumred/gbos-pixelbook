@@ -3,6 +3,11 @@
 Tested on one Pixelbook (2017, i5-7Y57, 8 GB, board EVE) with Googlebook OS build 16452207 (Lenovo "ruby"
 recovery, Android 17). "Verified" means seen on the device or in its logs.
 
+**Current build.** This repository now builds Google's newer build 16658739 (CL3B.260622.276.R4, Android 17 SDK 37.1,
+security patch 2026-10-01). Google's setup needs this build. It has the same kernel as the older build. In a virtual machine
+it starts like the older build: no module problems, no illegal-instruction faults and the same speed-ups. A Pixelbook test
+of the new build is still to do.
+
 ## Works (verified on the device)
 
 | Area | Notes |

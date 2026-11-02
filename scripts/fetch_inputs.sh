@@ -7,7 +7,7 @@
 #
 # Result:
 #   <inputs>/gbrunch/                     gbrunch at a pinned commit (compatibility kit, assembler, policy tool)
-#   <inputs>/recovery/ruby-recovery.raw   Google's Lenovo "ruby" Googlebook recovery, build 16452207 (19 GB, sparse)
+#   <inputs>/recovery/ruby-recovery.raw   Google's Lenovo "ruby" Googlebook recovery (build: see scripts/pins.sh; 19 GB, sparse)
 #   <inputs>/donor/super.raw              AOSP Cuttlefish build 16373615 super partition (baseline zlib source)
 #   <inputs>/kernel/common/               AOSP kernel/common at the commit of the shipped 6.18.21-android17-5 kernel
 #   <inputs>/chromeos/lib/firmware/intel/avs/   Pixelbook audio DSP firmware (see the note at the end)
@@ -23,9 +23,7 @@ GBRUNCH_URL="${GBRUNCH_URL:-https://github.com/danbyumagic/gbrunch.git}"
 GBRUNCH_COMMIT=4523889706b598d4f8c7380cb74bbac68ef3ac4e
 GBRUNCH_KIT_SHA=ba6eac2e2c1482bb3b0e4f4c1aee658b1dc488cce54e5ccbb2726e01fa3376c3
 
-RECOVERY_URL=https://dl.google.com/device/recovery/ruby-user/16452207/recovery.zip
-RECOVERY_ZIP_SHA=3c4dc7f636f29a1207e71d001fd2864aa20ce8354faecd2ef1ae47582b977f6c
-RECOVERY_RAW_SHA=4f4490415d4db0721fa99ad10abd64b1b05c284b6c0e413907da948561de8c9e
+. "$ROOT/scripts/pins.sh"     # recovery build, URL and hashes
 
 DONOR_URL="https://androidbuildinternal.googleapis.com/android/internal/build/v3/builds/16373615/aosp_cf_x86_64_only_phone-userdebug/attempts/latest/artifacts/aosp_cf_x86_64_only_phone-img-16373615.zip/url"
 DONOR_ZIP_BYTES=1163638742
@@ -55,7 +53,7 @@ fi
 [ "$(git -C "$IN/gbrunch" rev-parse HEAD)" = "$GBRUNCH_COMMIT" ] || { echo "gbrunch checkout is not at $GBRUNCH_COMMIT"; exit 1; }
 checked "$IN/gbrunch/dist/gbrunch-compatibility-assets-v7.tar.gz" "$GBRUNCH_KIT_SHA"
 
-say "Googlebook recovery (ruby, 16452207)"
+say "Googlebook recovery (ruby, build $RECOVERY_BUILD)"
 mkdir -p "$IN/recovery"
 RAW="$IN/recovery/ruby-recovery.raw"
 if [ ! -e "$RAW" ]; then
@@ -64,7 +62,7 @@ if [ ! -e "$RAW" ]; then
 		curl -fL --retry 3 -C - -o "$ZIP.part" "$RECOVERY_URL"
 		mv "$ZIP.part" "$ZIP"
 	fi
-	checked "$ZIP" "$RECOVERY_ZIP_SHA"
+	if [ -n "$RECOVERY_ZIP_SHA" ]; then checked "$ZIP" "$RECOVERY_ZIP_SHA"; else echo "note: no pinned ZIP hash; the extracted image is checked below"; fi
 	echo "extracting the raw image (sparse) ..."
 	python3 - "$ZIP" "$RAW.part" <<'PY'
 import sys, zipfile

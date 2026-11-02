@@ -11,6 +11,8 @@
 # Output: $WORK/gbrunch-work/eve.raw, a 28.7 GB disk image for a 32 GB USB stick (docs/INSTALL.md).
 # It contains Google's software: keep it for yourself, never publish it.
 set -euo pipefail
+# The build mounts disk images, which needs root. Run "sudo -i" first and build from that root shell.
+[ "$(id -u)" = 0 ] || { echo "build.sh: run as root (sudo -i). The build mounts disk images."; exit 1; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="${WORK:-$HOME/googlebook-pixelbook}"
 INPUTS="${INPUTS:-$WORK/inputs}"

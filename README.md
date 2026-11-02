@@ -47,8 +47,9 @@ It builds on [gbrunch](https://github.com/danbyumagic/gbrunch), which runs Googl
 It is slower than ChromeOS. Details: [docs/STATUS.md](docs/STATUS.md).
 
 > [!NOTE]
-> The table shows what works on one Pixelbook with Google's June 2026 build (16452207). Google released a newer build.
-> This repository now builds the newer one. Testing it on a Pixelbook is in progress.
+> The table shows what works on one Pixelbook with Google's June 2026 build (16452207). Google released a newer build
+> (16658739), and its setup needs it. This repository builds the newer one. It starts correctly in a virtual machine.
+> A test on a Pixelbook is still to do.
 
 ## Pick your path
 

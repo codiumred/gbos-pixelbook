@@ -987,3 +987,26 @@ software KeyMint too. None addresses attestation.
   creation time and entries), `install.cfg` still `gb_data=disk`. Fresh-install eMMC boot also VERIFIED: own boot_a
   UUID, /data on ext4, zygote and SurfaceFlinger. (v13's result line says "INSTALL SUCCEEDED" for updates too; fixed in
   the source for the next build.)
+
+## 26. v14: Google's newer recovery build 16658739 (2026-11-01)
+
+- **Why**: Google released a newer Googlebook build and its setup needs it. New image: build 16658739 = CL3B.260622.276.R4
+  (SDK 37.1, security patch 2026-10-01, built 2026-10-20), raw SHA-256 `805de2e7...`. Old: 16452207 = CL3B.260622.271.R1
+  (`4f449041...`). The download URL pattern `ruby-user/<build>/recovery.zip` exists for the new build (HTTP 200).
+- **Kernel unchanged** (VERIFIED from module vermagic): vendor_dlkm modules `6.18.21-android17-5-ga3bbc4527b7b-ab16320342`,
+  system_dlkm `...-g3938c8d97142-ab16302624`, 484 + 100 modules, as before. So the rebuilt kernel, the i915 build, the
+  emulator and the audio fix carry over; the assembler's check of Google's kernel binary hash also passed.
+- **gbrunch pins one image** (`RAW_HASH` in `assemble_external_lab.py`, imported by `assemble_native_android.py`) and upstream
+  lists only the old build. `image/assemble_with_pin.py` replaces only that constant with the hash in `scripts/pins.sh`
+  (set before the assembler imports it) and runs the assembler unchanged; its other checks (kit assets, kernel hash,
+  module hashes) still run and passed. Recovery pins now live in `scripts/pins.sh`. The ZIP hash is empty (no ZIP was
+  hashed); the extracted raw image is checked.
+- **QEMU boot of the v14 image** (VERIFIED): no module load problems, 0 invalid-opcode traps reaching programs, 0 SIGILL,
+  0 panics; reaches zygote and SurfaceFlinger. Fast paths still match the new libcrypto: `fast_sha256=68121 calls /
+  18992102 blocks`, `fast_sha1=21361 calls`. The boot menu computed the new image's own boot_a UUID (`81df2a74-...`). SELinux
+  denials: 58 distinct vs 55 for v13; the 3 new ones are all from the `shell` domain (the logger probing netd and
+  dnsresolver). Nothing new from Google's services.
+- The module `snd-soc-avs.ko` differs in hash from v13's (`7d4b87e2...` vs `6019dc82...`) only because the kernel build number
+  is now pinned (`KBUILD_BUILD_VERSION=1`); its symbol versions are still identical to Google's (268).
+- Not tested: the device. Also not done: regenerating the fast-path table from the new image with `gen_fastpath.py` (the
+  counters above show the existing table still matches).

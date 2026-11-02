@@ -9,6 +9,8 @@
 # vendor derivation runs in gbrunch's isolated tool VM under TCG and takes several minutes.
 set -euo pipefail
 IN="${1:?inputs dir}"; W="${2:?work dir}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../scripts/pins.sh"     # RECOVERY_RAW_SHA: which official recovery build this repository is built for
 KIT="$IN/gbrunch/dist/gbrunch-compatibility-assets-v7.tar.gz"
 SRC="$IN/recovery/ruby-recovery.raw"
 mkdir -p "$W"
@@ -20,7 +22,7 @@ if [ ! -f "$W/recovery.raw" ]; then
 	cp --sparse=always "$SRC" "$W/recovery.raw.part" && mv "$W/recovery.raw.part" "$W/recovery.raw"
 fi
 if [ ! -f "$W/native.raw" ]; then
-	(cd "$W/kit/assets" && python3 assemble_native_android.py --recovery-raw "$W/recovery.raw" \
+	(cd "$W/kit/assets" && RECOVERY_RAW_SHA="$RECOVERY_RAW_SHA" python3 "$HERE/assemble_with_pin.py" --recovery-raw "$W/recovery.raw" \
 		--output "$W/native.raw" --cache "$W/cache" --format raw)
 fi
 # EFI system partition offset from the GPT, then the files gbrunch's GRUB would load.
