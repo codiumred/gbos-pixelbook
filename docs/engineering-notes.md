@@ -1010,3 +1010,20 @@ software KeyMint too. None addresses attestation.
   is now pinned (`KBUILD_BUILD_VERSION=1`); its symbol versions are still identical to Google's (268).
 - Not tested: the device. Also not done: regenerating the fast-path table from the new image with `gen_fastpath.py` (the
   counters above show the existing table still matches).
+
+### 26.1 Write protection on the EVE: `gsctool -a -w disable` does not work (VERIFIED on the device, 2026-11-01)
+
+- The owner ran `sudo gsctool -a -w disable` on the Pixelbook in ChromeOS developer mode and got
+  `Error: CCD info version incorrect (0)` / `Cr50 does not support this operation`. The Pixelbook has a Cr50 security chip.
+- MrChromebox's pages list `gsctool` from ChromeOS as a write-protect method for **Ti50** chips; for **Cr50** boards they list
+  battery disconnect, jumper, screw or SuzyQ cable, and the supported-devices row for EVE says "CR50 (SuzyQ, battery)".
+  Our earlier docs (docs/INSTALL.md v13, the first FIRMWARE.md) wrongly presented the `gsctool` route as working for this
+  Pixelbook. The fault was in our reading of MrChromebox's page; it is corrected in FIRMWARE.md.
+- Forum reports for the EVE (chrultrabook): MrChromebox says the EVE "doesn't support using the SuzyQ in loopback mode"
+  (the cable plugged into the Pixelbook itself); the working method was to connect the SuzyQ to a **different Linux
+  computer** and send `ccd reset factory` / `wp disable` over `/dev/ttyUSB0`, after CCD was opened with `gsctool -a -o`.
+  Users also report that the case is hard to open and close again, so the battery-disconnect method is not recommended.
+  (Anecdotal; not tested here.)
+- Consequence: RW_LEGACY needs no write-protect step and is the recommended path; the Full ROM needs a SuzyQ cable and a
+  second Linux computer. FIRMWARE.md and the README path chooser now say so. The `crossystem wpsw_cur` value `0` is the
+  check before flashing (not `gsctool -a -w`).

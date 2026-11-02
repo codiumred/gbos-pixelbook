@@ -57,34 +57,37 @@ It is slower than ChromeOS. Details: [docs/STATUS.md](docs/STATUS.md).
 flowchart TD
     A([Start]) --> B{What do you want?}
     B -->|Try it. Keep ChromeOS.| C["<b>Path 1</b><br/>RW_LEGACY firmware<br/>Run from a USB stick"]
-    B -->|Use it every day. Remove ChromeOS.| D["<b>Path 2</b><br/>Full ROM firmware<br/>Test from a USB stick<br/>Install to the Pixelbook"]
+    B -->|Use it every day.| D["<b>Path 2</b><br/>RW_LEGACY firmware<br/>Test from a USB stick<br/>Install to the Pixelbook"]
+    D -.->|Later, if the Ctrl+L at each start annoys you| E["<b>Path 3</b><br/>Add the Full ROM firmware<br/>Needs a SuzyQ cable"]
     C -.->|Later, if you like it| D
 ```
 
-| | **Path 1: Try it** | **Path 2: Daily use** (recommended) | Path 2b: Install with RW_LEGACY |
+| | **Path 1: Try it** | **Path 2: Daily use** (recommended) | Path 3: Daily use with Full ROM |
 |---|---|---|---|
-| Firmware | RW_LEGACY | **Full ROM** | RW_LEGACY |
-| Write protection | Stays on | You turn it off once | Stays on |
-| ChromeOS | Stays | Removed | Removed |
-| Each start | Press **Ctrl+L** at a warning screen | Starts alone | Press **Ctrl+L** at a warning screen |
+| Firmware | RW_LEGACY | RW_LEGACY | **Full ROM** |
+| Extra hardware | None | None | **SuzyQ cable** and a second Linux computer (or you open the Pixelbook) |
+| Write protection | Stays on | Stays on | You turn it off once |
+| ChromeOS | Stays | Removed. A recovery USB stick brings it back. | Removed. Your firmware backup and a recovery USB stick bring it back. |
+| Each start | Press **Ctrl+L** at a warning screen | Press **Ctrl+L** at a warning screen | Starts alone |
 | Apps and files | Lost at each restart | Kept | Kept |
 | Speed | Slow (USB stick) | Faster | Faster |
 
-Not sure? Choose **Path 1**. You can move to Path 2 later.
+Not sure? Choose **Path 1**. You can move to Path 2 later. Path 3 is optional. It only removes the **Ctrl+L** step.
 
 ## What you need
 
 - A **2017 Google Pixelbook** (board name `EVE`) and its charger.
 - A **PC** with Windows 10/11 or Linux. About **130 GB** of free disk space and **2 hours** for the build.
 - A **USB stick** with 32 GB or more (erased during the process).
-- A second, small **USB stick** for your firmware backup (Path 2 only).
+- A **ChromeOS recovery USB stick** (any size) if you plan to remove ChromeOS. It is your way back.
+- For Path 3 only: a **SuzyQ cable**, a second USB stick for the firmware backup, and a second computer that runs Linux.
 - A Google account for the Googlebook setup.
 
 ## Step by step
 
 | Step | What you do | Guide |
 |---|---|---|
-| **1** | Install new firmware on the Pixelbook. Do this **before** you remove ChromeOS. | [docs/FIRMWARE.md](docs/FIRMWARE.md) |
+| **1** | Install the RW_LEGACY firmware on the Pixelbook (or the Full ROM for Path 3). Do this **before** you remove ChromeOS. | [docs/FIRMWARE.md](docs/FIRMWARE.md) |
 | **2** | Build the image on your PC. One command: `./build.sh` | [docs/BUILD.md](docs/BUILD.md) |
 | **3** | Write the image to a USB stick with Rufus. Start the Pixelbook from it. | [docs/INSTALL.md](docs/INSTALL.md) |
 | **4** | Optional: install to the Pixelbook. This erases ChromeOS. | [docs/INSTALL.md](docs/INSTALL.md#b-install-to-the-pixelbook-erases-chromeos) |

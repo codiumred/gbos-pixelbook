@@ -5,23 +5,26 @@ install new firmware first. [MrChromebox](https://docs.mrchromebox.tech) makes f
 
 > [!WARNING]
 > Firmware changes can make a Pixelbook unable to start. Follow each step. Keep the charger connected.
-> The steps in this guide come from MrChromebox's documentation. If his page and this guide differ, follow his page.
+> The steps in this guide come from MrChromebox's documentation and from reports of people with the same Pixelbook.
+> If his page and this guide differ, follow his page.
 
 ## Choose your firmware
 
-| | **RW_LEGACY** | **Full ROM** (recommended) |
+| | **RW_LEGACY** (start here) | **Full ROM** |
 |---|---|---|
 | What it does | Adds a second boot option. ChromeOS stays. | Replaces the whole firmware. ChromeOS does not start any more. |
-| Write protection | Stays on. You change nothing. | You must turn it off first. |
+| Extra hardware | None. | A **SuzyQ cable** and a **second computer that runs Linux**. Or you open the Pixelbook and disconnect the battery. |
+| Write protection | Stays on. You change nothing. | You must turn it off first (see Path B). |
 | Each time you turn the Pixelbook on | A warning screen shows. Press **Ctrl+L** to continue. | The Pixelbook starts straight away. |
-| Risk | Low. Pressing **Space** on the warning screen turns developer mode off and erases the local data. | Low, but a failed flash can stop the Pixelbook from starting. |
-| Way back to ChromeOS | ChromeOS is still there. | Restore your firmware backup, then use a ChromeOS recovery USB stick. |
-| Good for | Trying Googlebook OS from a USB stick. | Daily use as your only operating system. |
+| Risk | Low. It cannot damage the firmware. Pressing **Space** on the warning screen turns developer mode off and erases the local data. | Low, but a failed flash can stop the Pixelbook from starting. |
+| Way back to ChromeOS | Use a ChromeOS recovery USB stick. | Restore your firmware backup, then use a ChromeOS recovery USB stick. |
+| Good for | Trying Googlebook OS. Daily use, if you accept the **Ctrl+L** at each start. | Daily use with no warning screen. |
 
-**Not sure?** Start with RW_LEGACY. You can install the Full ROM later while ChromeOS is still installed.
+**Not sure?** Use RW_LEGACY. Everything in this project works with it, including the install to the Pixelbook.
+You can add the Full ROM later.
 
 > [!IMPORTANT]
-> Install the firmware **before** you remove ChromeOS. The firmware tools run inside ChromeOS.
+> Do the firmware steps **before** you remove ChromeOS. Some of them use tools that only ChromeOS has.
 
 ## Before you start
 
@@ -32,7 +35,9 @@ Do each item in this list first:
 3. Copy the **audio firmware** from ChromeOS. The build needs it for sound. Read
    [the audio firmware section in BUILD.md](BUILD.md#the-audio-firmware).
 4. Copy anything else you want to keep from ChromeOS. Developer mode erases the local data.
-5. Prepare a **second USB stick** (any size) to hold your firmware backup.
+5. Make a **ChromeOS recovery USB stick** on another computer. It is your way back. Use Google's
+   [Chromebook Recovery Utility](https://chromewebstore.google.com/detail/chromebook-recovery-utility/pocpnlppkickgojjlmhdmidojbmbodfm).
+6. For the Full ROM only: prepare a **second USB stick** (any size) for your firmware backup.
 
 ## Turn on developer mode
 
@@ -80,40 +85,60 @@ Part 1 turns off write protection. Part 2 installs the firmware.
 
 ### Part 1: Turn off write protection
 
-The Pixelbook has a security chip called **Cr50**. The chip locks the firmware. These commands unlock it. You do not
-need to open the Pixelbook or buy a cable.
+> [!NOTE]
+> **The command `gsctool -a -w disable` does not work on the Pixelbook.** It prints
+> `Error: CCD info version incorrect (0)` and `Cr50 does not support this operation`. The Pixelbook has a **Cr50**
+> security chip, and the error says that this chip does not support the command. MrChromebox lists the command as a method
+> for the newer **Ti50** chip. For the Pixelbook (board `EVE`), he lists two methods: the **SuzyQ cable** and
+> **disconnecting the battery**.
 
-1. Open VT2 (see above).
-2. Run this command to open the chip's settings:
+**Method 1: SuzyQ cable (no need to open the Pixelbook)**
+
+A SuzyQ cable is a USB-C to USB-A debug cable. You also need a **second computer that runs Linux**. A Linux live USB
+stick is enough. Reports from other Pixelbook owners say the cable does **not** work when you connect it to the
+Pixelbook's own ChromeOS. It works when you connect it to another computer.
+
+1. Open CCD. On the Pixelbook, open VT2 and run this command:
 
    ```sh
    sudo gsctool -a -o
    ```
 
-3. Watch the screen. Each time it says `Press PP button now!`, press the **Power** button once.
-4. Keep going until the screen says `PP Done!`. This takes a few minutes.
-5. The Pixelbook restarts in normal mode. Turn on developer mode again (see
-   [Turn on developer mode](#turn-on-developer-mode)). This erases the local data again.
-6. Open VT2 again.
-7. Run this command to turn off write protection:
+2. Each time the screen says `Press PP button now!`, press the **Power** button once. Keep going until the screen
+   says `PP Done!`. This takes a few minutes.
+3. The Pixelbook restarts in normal mode. Turn on developer mode again (see
+   [Turn on developer mode](#turn-on-developer-mode)).
+4. Connect the SuzyQ cable. Put the USB-C end in the Pixelbook and the USB-A end in the second computer.
+   If the next step shows nothing, flip the plug or use the Pixelbook's other USB-C port.
+5. On the second computer, run `ls /dev/ttyUSB*`. You must see `/dev/ttyUSB0`, `/dev/ttyUSB1` and `/dev/ttyUSB2`.
+6. On the second computer, run these three commands. They talk to the security chip:
 
    ```sh
-   sudo gsctool -a -w disable
+   sudo sh -c 'echo "wp disable" > /dev/ttyUSB0'
+   sudo sh -c 'echo "wp disable atboot" > /dev/ttyUSB0'
+   sudo sh -c 'echo "ccd reset factory" > /dev/ttyUSB0'
    ```
 
-8. Press the **Power** button when the screen asks you to.
-9. Check the result with this command:
+   (On an old Cr50 version, use `wp false` and `wp false atboot`.)
+7. On the Pixelbook, open VT2 and run this command:
 
    ```sh
-   sudo gsctool -a -w
+   sudo crossystem wpsw_cur
    ```
 
-   The output must include `Flash WP: forced disabled`. If it does not, do not continue. See
-   [MrChromebox's guide](https://docs.mrchromebox.tech/docs/firmware/wp/disabling.html) for other methods.
+   The answer must be `0`. The answer `1` means write protection is still on. Do not continue. Check the cable and repeat
+   from step 4.
+
+**Method 2: Disconnect the battery (opens the Pixelbook)**
+
+Open the Pixelbook and unplug the battery cable from the mainboard. Then start the Pixelbook on the charger. Write
+protection is off while the battery is out. MrChromebox says you need a USB-PD charger of 45 W or more.
+Other Pixelbook owners report that the case is hard to open and close again without damage. We do not recommend this
+method. See [MrChromebox's guide](https://docs.mrchromebox.tech/docs/firmware/wp/disabling.html) before you try it.
 
 > [!NOTE]
-> Write protection turns back on after a full power-off. This is fine. You only need it off while you flash.
-> Do **not** turn the Pixelbook off between Part 1 and Part 2.
+> With Method 1, the command `wp disable atboot` keeps write protection off after a power-off. With Method 2, write protection
+> comes back when you reconnect the battery. After you flash the Full ROM, you do not need to turn it on again.
 
 ### Part 2: Install the firmware
 
@@ -146,7 +171,6 @@ Continue with [Step 2](BUILD.md) (build the image) and [Step 3](INSTALL.md).
 
 ## Go back to ChromeOS
 
-- **RW_LEGACY:** Erase the Googlebook OS install. Then start a ChromeOS recovery USB stick. Make one with Google's
-  [Chromebook Recovery Utility](https://chromewebstore.google.com/detail/chromebook-recovery-utility/pocpnlppkickgojjlmhdmidojbmbodfm).
+- **RW_LEGACY:** Start a ChromeOS recovery USB stick (**Esc+Refresh+Power**). It erases Googlebook OS and installs ChromeOS.
 - **Full ROM:** Run MrChromebox's script and choose the option to restore the stock firmware. Use your backup.
   Then use a ChromeOS recovery USB stick.

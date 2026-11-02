@@ -11,6 +11,14 @@ The risk is low but real. A firmware change can stop the Pixelbook from starting
 (RW_LEGACY and a USB stick) is the safest. It does not touch ChromeOS. The Full ROM replaces the firmware. Keep the backup
 that MrChromebox's script offers.
 
+**Do I need to open my Pixelbook, or buy anything?**
+No, not for Path 1 or Path 2. RW_LEGACY needs no hardware and no write-protection step. Only the optional Full ROM needs a
+SuzyQ cable and a second Linux computer, or you open the Pixelbook and disconnect the battery. See [FIRMWARE.md](FIRMWARE.md).
+
+**The command `gsctool -a -w disable` printed "Cr50 does not support this operation".**
+This is normal on the Pixelbook. Its Cr50 chip does not support that command. Use RW_LEGACY (no write protection step), or use
+the SuzyQ method in [FIRMWARE.md](FIRMWARE.md#part-1-turn-off-write-protection).
+
 **Can I go back to ChromeOS?**
 Yes. See [Go back to ChromeOS](FIRMWARE.md#go-back-to-chromeos). Make a ChromeOS recovery USB stick on another computer first.
 
