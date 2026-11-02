@@ -1,74 +1,125 @@
-# Googlebook OS on the 2017 Google Pixelbook
+<h1 align="center">Googlebook OS on the 2017 Google Pixelbook</h1>
 
-Scripts and kernel patches that build Google's **Googlebook OS** (Android 17 for laptops) for the original
-**Google Pixelbook (2017, board EVE, Intel Core i5/i7 Kaby Lake-Y)** and boot it on the real hardware.
+<p align="center">
+  Run Google's new <b>Googlebook OS</b> (Android 17 for laptops) on the original <b>Pixelbook</b>.<br>
+  Scripts and patches that build it, install it, and fix what breaks on old hardware.
+</p>
 
-Googlebook OS is built for 2024-and-newer CPUs. The Pixelbook's Kaby Lake CPU lacks instructions that Google's
-build uses everywhere (GFNI, AVX-VNNI, SHA-NI, wide VAES), its GPU has no driver in Google's kernel, and its audio
-DSP trips a bug in Google's audio driver. This project fixes each of those without modifying Google's system
-partitions. It builds on [gbrunch](https://github.com/danbyumagic/gbrunch), which runs Googlebook OS on an HP Envy.
+<p align="center">
+  <img alt="Device" src="https://img.shields.io/badge/device-Pixelbook%202017%20(EVE)-blue">
+  <img alt="OS" src="https://img.shields.io/badge/OS-Googlebook%20OS%20(Android%2017)-green">
+  <img alt="Status" src="https://img.shields.io/badge/status-works%20from%20USB%20%7C%20internal%20install%20untested-orange">
+  <img alt="Licence" src="https://img.shields.io/badge/licence-MIT%20%2B%20GPL--2.0-lightgrey">
+</p>
 
-> **No Google software is in this repository.** You download Google's official recovery image yourself and the build
-> runs on your own machine. The resulting disk image contains Google's software: do not share it.
+> [!WARNING]
+> This is a hobby project. It is **not** from Google. You change your Pixelbook's firmware and you may erase ChromeOS.
+> A mistake can stop the Pixelbook from starting. Read each guide fully before you start.
 
-## Status (October 2026)
+## What is this?
 
-Working on the device: boot to desktop, Google sign-in and Play Store, GPU rendering (i915 + Vulkan), Wi-Fi,
-Bluetooth, touchscreen, touchpad, keyboard with the top-row keys, screen brightness, webcam, internal speakers.
+Google makes Googlebook OS for new laptops. The 2017 Pixelbook is too old for it. Its processor lacks instructions
+that Googlebook OS needs, and Google's kernel has no driver for its graphics chip.
 
-Internal install with persistent data: available in v13, tested in a virtual machine, not yet on a Pixelbook.
+This project fixes that. The main parts:
 
-Not working, or limits: Continue On and phone-assisted setup (they need Google-registered hardware attestation keys,
-see [docs/STATUS.md](docs/STATUS.md)); suspend (lid close keeps the machine awake); no over-the-air updates.
-It is slower than ChromeOS because missing CPU instructions are emulated by the kernel.
+- A **kernel patch** that runs the missing processor instructions in software.
+- The **graphics driver** for the Pixelbook's Intel chip.
+- A **fix for a bug** in Google's audio driver that froze the Pixelbook.
+- An **installer** that copies Googlebook OS to the Pixelbook's own storage.
 
-Full list: [docs/STATUS.md](docs/STATUS.md).
+It builds on [gbrunch](https://github.com/danbyumagic/gbrunch), which runs Googlebook OS on an HP laptop.
 
-## How it works
+> [!IMPORTANT]
+> **There is no ready-made download.** The system contains Google's software, and we cannot share it.
+> You build the image on your own PC with one command. The build downloads Google's official files for you.
 
-[docs/how-it-works.html](docs/how-it-works.html) is an interactive walk-through (open it in a browser): the layer
-stack, the instruction emulator, the boot sequence and the bugs found at each stage. The short version:
+## What works
 
-| Layer | What this project does |
+| Works on the Pixelbook | Does not work yet |
 |---|---|
-| Firmware | Boots through MrChromebox's UEFI firmware (RW_LEGACY or full ROM). |
-| Kernel | Rebuilds Google's exact kernel source (`android17-6.18-2026-06_r52`) with the same configuration, so Google's 643 prebuilt modules load unchanged, and adds: a trap-and-emulate handler for missing CPU instructions with SHA-256/SHA-1 whole-function fast paths, the i915 graphics driver, a touchpad fix and a fixed AVS audio driver. |
-| Drivers | Loads modules Google's image never triggers on this hardware (DMA-BUF heap, zram), adds GPU, Wi-Fi and Bluetooth firmware from linux-firmware and the audio DSP firmware from ChromeOS. |
-| Android | gbrunch's compatibility layer (derived vendor partition, software KeyMint), plus Pixelbook audio routing, key map, touchpad tuning, a few SELinux rules and startup tweaks. Google's system partitions stay byte-for-byte unchanged. |
+| ✅ Start, Google setup and sign-in, Play Store | ❌ **Continue On** and phone-assisted setup (needs a Google security key that this device does not have) |
+| ✅ Graphics, touchscreen, touchpad, keyboard | ❌ **Suspend** (the lid keeps the Pixelbook awake) |
+| ✅ Wi-Fi and Bluetooth | ❌ Over-the-air updates (you rebuild instead) |
+| ✅ Brightness, webcam, speakers | ❌ Keyboard backlight |
+| ✅ Quick Share | ❓ Headphone jack, microphones, HDMI audio (not tested yet) |
 
-The engineering log with every finding and its evidence is [docs/engineering-notes.md](docs/engineering-notes.md);
-[docs/components.md](docs/components.md) describes each script.
+It is slower than ChromeOS. Details: [docs/STATUS.md](docs/STATUS.md).
 
-## Getting started
+> [!NOTE]
+> The table shows what works on one Pixelbook with Google's June 2026 build (16452207). Google released a newer build.
+> This repository now builds the newer one. Testing it on a Pixelbook is in progress.
 
-1. **Build** the image on a Linux or Windows (WSL2) PC: [docs/BUILD.md](docs/BUILD.md). About 10 GB of downloads,
-   130 GB of work space, an hour or more. If you plan to replace ChromeOS, first copy the Pixelbook's audio firmware
-   from it (docs/BUILD.md explains how).
-2. **Firmware**: MrChromebox's RW_LEGACY or full UEFI ROM, installed from ChromeOS ([docs/INSTALL.md](docs/INSTALL.md)).
-3. **Boot it from a 32 GB USB stick** to try it: app data stays in RAM, every boot is a fresh device.
-4. **Install it to the internal eMMC** from the stick's boot menu, for a laptop that keeps its apps and data
-   ([docs/INSTALL.md](docs/INSTALL.md), section 5). Later versions update it in place from the stick.
+## Pick your path
 
-## Repository layout
+```mermaid
+flowchart TD
+    A([Start]) --> B{What do you want?}
+    B -->|Try it. Keep ChromeOS.| C["<b>Path 1</b><br/>RW_LEGACY firmware<br/>Run from a USB stick"]
+    B -->|Use it every day. Remove ChromeOS.| D["<b>Path 2</b><br/>Full ROM firmware<br/>Test from a USB stick<br/>Install to the Pixelbook"]
+    C -.->|Later, if you like it| D
+```
+
+| | **Path 1: Try it** | **Path 2: Daily use** (recommended) | Path 2b: Install with RW_LEGACY |
+|---|---|---|---|
+| Firmware | RW_LEGACY | **Full ROM** | RW_LEGACY |
+| Write protection | Stays on | You turn it off once | Stays on |
+| ChromeOS | Stays | Removed | Removed |
+| Each start | Press **Ctrl+L** at a warning screen | Starts alone | Press **Ctrl+L** at a warning screen |
+| Apps and files | Lost at each restart | Kept | Kept |
+| Speed | Slow (USB stick) | Faster | Faster |
+
+Not sure? Choose **Path 1**. You can move to Path 2 later.
+
+## What you need
+
+- A **2017 Google Pixelbook** (board name `EVE`) and its charger.
+- A **PC** with Windows 10/11 or Linux. About **130 GB** of free disk space and **2 hours** for the build.
+- A **USB stick** with 32 GB or more (erased during the process).
+- A second, small **USB stick** for your firmware backup (Path 2 only).
+- A Google account for the Googlebook setup.
+
+## Step by step
+
+| Step | What you do | Guide |
+|---|---|---|
+| **1** | Install new firmware on the Pixelbook. Do this **before** you remove ChromeOS. | [docs/FIRMWARE.md](docs/FIRMWARE.md) |
+| **2** | Build the image on your PC. One command: `./build.sh` | [docs/BUILD.md](docs/BUILD.md) |
+| **3** | Write the image to a USB stick with Rufus. Start the Pixelbook from it. | [docs/INSTALL.md](docs/INSTALL.md) |
+| **4** | Optional: install to the Pixelbook. This erases ChromeOS. | [docs/INSTALL.md](docs/INSTALL.md#b-install-to-the-pixelbook-erases-chromeos) |
+| **5** | Check that everything works. | [docs/TESTING.md](docs/TESTING.md) |
+
+Questions? Read the [FAQ](docs/FAQ.md).
+
+## Learn more
+
+- **[How it works](docs/how-it-works.html)** — an interactive guide. Download it and open it in a browser.
+- **[Engineering notes](docs/engineering-notes.md)** — every finding and its evidence.
+- **[Component reference](docs/components.md)** — what each script does.
+
+<details>
+<summary>Repository layout</summary>
 
 | Path | Contents |
 |---|---|
-| `build.sh` | Builds everything end to end. |
-| `scripts/fetch_inputs.sh` | Downloads and hash-checks Google's recovery, the AOSP Cuttlefish donor, the kernel source and gbrunch. |
-| `kernel/` | Kernel changes (`apply.sh`), build script, extra config, the instruction emulator, the rebuilt audio module. |
-| `isa_emu/` | Instruction decoder/emulator core shared by the kernel and its differential tests. |
-| `image/` | Image assembly: gbrunch base image, kernel/initrd swap, vendor overlay, compatibility partition patches. |
-| `audio/`, `input/`, `policy/` | Pixelbook audio configuration, keyboard and touchpad files, SELinux rule additions. |
-| `qemu/` | QEMU boot tests (early boot only; QEMU has no usable GPU for Android). |
-| `windows/` | PowerShell tools: update a USB stick in place, copy logs off the stick. |
-| `tools/` | Analysis tools used during development (instruction scanner, EROFS reader, trace analysers). |
+| `build.sh` | Builds everything. |
+| `scripts/` | Downloads and checks Google's files, with pinned versions (`pins.sh`). |
+| `kernel/` | Kernel changes, the instruction emulator and the fixed audio driver. |
+| `isa_emu/` | The instruction emulator core and its tests. |
+| `image/` | Builds the final disk image. |
+| `install/` | The installer that copies the system to the Pixelbook. |
+| `audio/`, `input/`, `policy/` | Audio setup, keyboard and touchpad files, security rules. |
+| `qemu/` | Virtual machine tests. |
+| `windows/` | PowerShell tools for USB sticks and logs. |
+| `tools/` | Analysis tools from development. |
+
+</details>
 
 ## Credits and licences
 
-See [CREDITS.md](CREDITS.md). Scripts and configuration are MIT-licensed ([LICENSE](LICENSE)). Kernel code and
-the instruction emulator (`kernel/`, `isa_emu/`, files marked `SPDX-License-Identifier: GPL-2.0`) are GPL-2.0
-([LICENSES/GPL-2.0.txt](LICENSES/GPL-2.0.txt)). Googlebook OS is proprietary Google software and is not covered by
-either licence.
+- Built on [gbrunch](https://github.com/danbyumagic/gbrunch) (MIT). Read [CREDITS.md](CREDITS.md) for everyone else.
+- Scripts and settings: MIT ([LICENSE](LICENSE)).
+- Kernel code and the instruction emulator (`kernel/`, `isa_emu/`): GPL-2.0 ([LICENSES/GPL-2.0.txt](LICENSES/GPL-2.0.txt)).
+- Googlebook OS belongs to Google. This project does not include it.
 
-This is an independent hobby project, not affiliated with or endorsed by Google, Lenovo or Intel. Flashing
-firmware and replacing the operating system can make a device unbootable; you do it at your own risk.
+This project is not affiliated with or endorsed by Google, Lenovo or Intel. You use it at your own risk.

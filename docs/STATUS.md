@@ -30,7 +30,7 @@ recovery, Android 17). "Verified" means seen on the device or in its logs.
 
 ## Installing to the internal eMMC
 
-Available (docs/INSTALL.md, section 5), with persistent app data. Tested in QEMU with an emulated eMMC behind an SDHCI
+Available (see [INSTALL.md](INSTALL.md#b-install-to-the-pixelbook-erases-chromeos)), with persistent app data. Tested in QEMU with an emulated eMMC behind an SDHCI
 controller: the installer, the boot from the eMMC, /data on disk and its persistence across a second boot. Not yet
 tested on a Pixelbook.
 

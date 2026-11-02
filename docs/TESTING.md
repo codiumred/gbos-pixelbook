@@ -16,7 +16,7 @@ logs off the stick afterwards (`windows/dump_usb_logs.ps1`), or read them live o
 
 ## Firmware (once, from ChromeOS)
 
-See docs/INSTALL.md section 1. After flashing, boot the stick again with Esc instead of CTRL+L and repeat step 2.
+See [FIRMWARE.md](FIRMWARE.md). After flashing, boot the stick again with Esc instead of CTRL+L and repeat step 2.
 
 ## Suspend (optional, from the stick)
 

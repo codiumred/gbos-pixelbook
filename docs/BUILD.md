@@ -1,23 +1,42 @@
-# Building the image
+# Step 2: Build the image
 
-The build runs on Linux or on Windows through WSL2. It was developed on Ubuntu 26.04 under WSL2 on an x86-64 PC.
+You build the image on your own PC. The build downloads Google's official files and combines them with the patches in this
+repository. It needs Linux. On Windows, you use WSL2, which runs Linux inside Windows.
+
+The first build takes about 2 hours. A fast PC with a fast disk is quicker.
 
 ## What you need
 
-- About **10 GB of downloads** and **130 GB of free disk space** in the Linux file system (not under `/mnt/c` on
-  WSL: the kernel build is many times slower there).
-- 8 GB RAM or more; the kernel build uses every CPU core.
-- The **Pixelbook's audio firmware**, taken from ChromeOS (see below). Everything else is downloaded.
+- About **10 GB** of downloads and **130 GB** of free disk space.
+- 8 GB of RAM or more. The kernel build uses every processor core.
+- Linux (tested: Ubuntu 26.04) or Windows 10/11 with WSL2.
+- The Pixelbook's **audio firmware**, copied from ChromeOS (see [below](#the-audio-firmware)).
 
-Packages (Ubuntu):
+## Windows only: install Linux (WSL2)
+
+1. Open **PowerShell** as Administrator.
+2. Run this command:
+
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+
+3. Restart the PC if Windows asks. Open **Ubuntu** from the Start menu. Create a user name and a password.
+4. Keep a window open while the build runs. WSL stops Linux when no window is open, and a stopped Linux kills the build.
+5. Do all the work **inside the Linux file system** (for example `/root`), not in `/mnt/c`. Builds on `/mnt/c` are many times slower.
+
+## Install the build tools
+
+The build mounts disk images, so it needs root. In Ubuntu, run `sudo -i` and do **all** the following steps in that root shell.
 
 ```sh
-sudo apt-get install -y build-essential clang lld llvm bc bison flex libelf-dev libssl-dev libdw-dev zlib1g-dev \
+apt-get update
+apt-get install -y build-essential clang lld llvm bc bison flex libelf-dev libssl-dev libdw-dev zlib1g-dev \
   dwarves cpio kmod lz4 zstd erofs-utils e2fsprogs fdisk mtools attr python3 git curl rsync ca-certificates \
   libclang-dev pkg-config qemu-system-x86 qemu-utils nasm grub-common grub-efi-amd64-bin busybox-static
 ```
 
-The kernel contains Rust code, so it also needs the Rust version Google built it with:
+The kernel contains Rust code. It needs the exact Rust version that Google used:
 
 ```sh
 curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.91.1 --component rust-src
@@ -25,56 +44,72 @@ curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.91.1 --compon
 cargo install --locked bindgen-cli --version 0.72.1
 ```
 
-Tested versions: clang 21.1.8, rustc 1.91.1, bindgen 0.72.1. A different clang may still work; a different rustc
-will not (the kernel records its exact version).
-
-**On WSL**, keep a terminal with `wsl.exe` open during the build: WSL stops the Linux VM when no Windows process is
-attached, which kills long builds started in the background.
+Tested versions: clang 21.1.8, rustc 1.91.1, bindgen 0.72.1. A different clang can work. A different Rust version does not,
+because the kernel records the exact version.
 
 ## The audio firmware
 
-The Pixelbook's audio DSP needs Intel's AVS firmware and ChromeOS's topology files for this board. Google ships them in
-ChromeOS, not in linux-firmware. Put them in `<inputs>/chromeos/lib/firmware/intel/avs/` before building, one of:
+The Pixelbook's audio chip needs firmware files that only ChromeOS has. Copy them **before** you remove ChromeOS.
+Without them the build works, but the Pixelbook has no sound.
 
-- **From ChromeOS on the Pixelbook** (before you replace ChromeOS): in a ChromeOS developer shell, copy
-  `/lib/firmware/intel/avs` with symlinks resolved to a USB stick, e.g. `cp -rL /lib/firmware/intel/avs /media/removable/<stick>/`,
-  then place it at `<inputs>/chromeos/lib/firmware/intel/avs`.
-- **From the official EVE ChromeOS recovery image**: `scripts/extract_chromeos_firmware.sh <eve recovery .bin> <inputs>/chromeos`
-  (untested so far).
+1. On the Pixelbook, sign in to ChromeOS. **Guest mode** works. ChromeOS mounts a USB stick only after sign-in.
+2. Insert a USB stick. Open VT2 (see [FIRMWARE.md](FIRMWARE.md#open-a-command-window)). Find the stick's name with
+   `ls /media/removable`.
+3. Run this command. Replace `STICK` with the name:
 
-Without it the build still succeeds and the system boots, but internal audio is off.
+   ```sh
+   sudo cp -rL /lib/firmware/intel/avs /media/removable/STICK/
+   ```
 
-## Build
+4. On your build PC, copy the folder `avs` to `<inputs>/chromeos/lib/firmware/intel/avs/`.
+   The default `<inputs>` folder is `~/googlebook-pixelbook/inputs`.
+
+Keep a second copy of the folder somewhere safe. After you remove ChromeOS, you cannot get the files again.
+
+## Run the build
 
 ```sh
-git clone <this repository> && cd googlebook-pixelbook
+git clone https://github.com/codiumred/gbos-pixelbook.git
+cd gbos-pixelbook
 ./build.sh
 ```
 
-`build.sh` runs these steps; each can also be run on its own:
+The result is `~/googlebook-pixelbook/gbrunch-work/eve.raw` (28.7 GB, sparse). It contains Google's software. **Do not share it.**
+Continue with [Step 3](INSTALL.md) to write it to a USB stick.
 
-1. `scripts/fetch_inputs.sh` downloads gbrunch at a pinned commit, Google's Lenovo "ruby" recovery (build 16452207),
-   the AOSP Cuttlefish build 16373615 and the kernel source (tag `android17-6.18-2026-06_r52`), and checks each
-   against a pinned SHA-256 or commit. Reruns reuse what is there.
-2. `kernel/apply.sh` applies the kernel changes to the source tree (idempotent).
-3. `image/gbrunch_assemble.sh` builds gbrunch's base image from the recovery. This starts gbrunch's isolated tool VM
-   under QEMU and takes a while.
-4. The shipped kernel configuration is extracted from Google's own kernel on that image.
-5. `image/build_eve_image.sh` builds the kernel and the fixed audio module, then produces the Pixelbook image: our
-   kernel and initrd, GPU/Wi-Fi/Bluetooth firmware, the vendor overlay (audio, input, SELinux), the compatibility
-   partition patches and the boot menu.
+To use other folders, set `WORK=...` (work area) and `INPUTS=...` before you run `./build.sh`.
 
-Paths can be changed with `WORK=...` (work area, default `~/googlebook-pixelbook`) and `INPUTS=...`.
+## What the build does
 
-The result is `$WORK/gbrunch-work/eve.raw` (28.7 GB, sparse). It contains Google's software: keep it to yourself.
+`build.sh` runs these steps. You can also run each step alone.
+
+1. `scripts/fetch_inputs.sh` downloads and checks Google's recovery image, gbrunch, the AOSP donor image and the kernel
+   source. Each file has a pinned hash or commit. A second run reuses the files.
+2. `kernel/apply.sh` applies the kernel changes to the source tree. It is safe to run twice.
+3. `image/gbrunch_assemble.sh` builds gbrunch's base image from the recovery image. This starts a small virtual machine and
+   takes a while.
+4. The build reads the kernel configuration from Google's own kernel in that image.
+5. `image/build_eve_image.sh` builds our kernel and the fixed audio driver. It then makes the final image: the kernel,
+   the first-stage boot files, the firmware, the audio and input files, the security rules, the boot menu and the installer.
+
+## Use a different Google build
+
+Google releases new recovery builds. The pinned build is in `scripts/pins.sh`.
+
+1. Download the new recovery image from Google. Extract the `.bin` file.
+2. Calculate its SHA-256 hash.
+3. Put the build number, URL and hash in `scripts/pins.sh`.
+4. Run `./build.sh` again.
+
+gbrunch's assembler accepts only one image. The script `image/assemble_with_pin.py` replaces that one check with your pinned
+hash. All other checks stay: the assembler still checks Google's kernel and its own modules. If a new build changes the kernel,
+the build stops with a clear message.
 
 ## Checks
 
-- `qemu/qemu_eve_uefi_boot.sh <work dir> <log> [seconds]` boots the image under QEMU with a Kaby Lake-class CPU
-  model. QEMU has no GPU the Android graphics stack accepts, so it stops after SurfaceFlinger starts; it proves the
-  early boot, the module loads and that no missing-instruction faults reach programs.
-- `make -C isa_emu/test test` runs the emulator's differential tests on a CPU that has the emulated instructions
-  (any recent Intel or AMD), comparing every result with the real hardware.
-- The kernel build fails rather than producing a kernel whose symbol versions differ from what Google's modules
-  expect, and `kernel/build_avs_module.sh` refuses an audio module that differs from Google's in its imports,
-  parameters or function list.
+- `qemu/qemu_eve_uefi_boot.sh <work dir> <log> [seconds]` starts the image in a virtual machine with a Kaby Lake-like CPU.
+  The virtual machine has no usable GPU, so Android stops after SurfaceFlinger starts. The test proves the early start-up,
+  the module loading and the instruction emulation.
+- `make -C isa_emu/test test` compares the emulator with a real processor. It needs a CPU with the emulated instructions.
+- The kernel build stops if a symbol version differs from what Google's modules expect.
+  `kernel/build_avs_module.sh` refuses an audio module that differs from Google's in its imports, parameters or functions.
