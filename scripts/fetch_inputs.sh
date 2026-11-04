@@ -10,7 +10,7 @@
 #   <inputs>/recovery/ruby-recovery.raw   Google's Lenovo "ruby" Googlebook recovery (build: see scripts/pins.sh; 19 GB, sparse)
 #   <inputs>/donor/super.raw              AOSP Cuttlefish build 16373615 super partition (baseline zlib source)
 #   <inputs>/kernel/common/               AOSP kernel/common at the commit of the shipped 6.18.21-android17-5 kernel
-#   <inputs>/chromeos/lib/firmware/intel/avs/   Pixelbook audio DSP firmware (see the note at the end)
+#   <inputs>/chromeos/lib/firmware/intel/avs/   Pixelbook audio DSP firmware (scripts/extract_chromeos_firmware.sh; see the note at the end)
 #
 # Already present files are reused after their hash is checked; a hash that does not match stops the script.
 # Downloads: about 7.8 GB (recovery ZIP) + 1.2 GB (donor ZIP) + 0.3 GB (kernel source). Needs ~45 GB free.
@@ -141,8 +141,9 @@ else
 MISSING: $IN/chromeos/lib/firmware/intel/avs
 The audio DSP firmware and topologies for this board are not in linux-firmware in the form ChromeOS uses.
 Get them from ChromeOS itself, one of:
+  - from Google's official Pixelbook (eve) ChromeOS recovery image, no Pixelbook needed:
+      scripts/extract_chromeos_firmware.sh $IN
   - on a Pixelbook still running ChromeOS: copy /lib/firmware/intel/avs to a USB stick (see docs/BUILD.md)
-  - from the official EVE ChromeOS recovery image: scripts/extract_chromeos_firmware.sh <recovery.bin> $IN/chromeos
 Without them the image builds and boots, but has no internal audio.
 EOF
 fi

@@ -32,7 +32,7 @@ Do each item in this list first:
 
 1. Connect the charger. Use the original Pixelbook charger if you can.
 2. Charge the battery to at least 50%.
-3. Copy the **audio firmware** from ChromeOS. The build needs it for sound. Read
+3. Get the **audio firmware**. The build needs it for sound. You can copy it from ChromeOS or download it from Google. Read
    [the audio firmware section in BUILD.md](BUILD.md#the-audio-firmware).
 4. Copy anything else you want to keep from ChromeOS. Developer mode erases the local data.
 5. Make a **ChromeOS recovery USB stick** on another computer. It is your way back. Use Google's

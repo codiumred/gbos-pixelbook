@@ -82,7 +82,7 @@ Use the checklist in [TESTING.md](TESTING.md) to check sound, camera, Wi-Fi and 
 Check this list first:
 
 - You tested the stick (path A) and it works.
-- You copied the audio firmware from ChromeOS ([BUILD.md](BUILD.md#the-audio-firmware)). You cannot get it back later.
+- You have the audio firmware ([BUILD.md](BUILD.md#the-audio-firmware)). Without it the Pixelbook has no sound.
 - You installed the firmware you want ([Step 1](FIRMWARE.md)).
 - The charger is connected.
 

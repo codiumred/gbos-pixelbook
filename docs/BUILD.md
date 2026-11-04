@@ -10,7 +10,7 @@ The first build takes about 2 hours. A fast PC with a fast disk is quicker.
 - About **10 GB** of downloads and **130 GB** of free disk space.
 - 8 GB of RAM or more. The kernel build uses every processor core.
 - Linux (tested: Ubuntu 26.04) or Windows 10/11 with WSL2.
-- The Pixelbook's **audio firmware**, copied from ChromeOS (see [below](#the-audio-firmware)).
+- The Pixelbook's **audio firmware**, from Google's ChromeOS image or copied from your Pixelbook (see [below](#the-audio-firmware)).
 
 ## Windows only: install Linux (WSL2)
 
@@ -49,8 +49,27 @@ because the kernel records the exact version.
 
 ## The audio firmware
 
-The Pixelbook's audio chip needs firmware files that only ChromeOS has. Copy them **before** you remove ChromeOS.
-Without them the build works, but the Pixelbook has no sound.
+The Pixelbook's audio chip needs firmware files that come from ChromeOS. Without them the build works, but the Pixelbook has
+no sound. Use **one** of these two ways to get them.
+
+### Way 1: Download them from Google (no Pixelbook needed)
+
+Run this command on your build PC:
+
+```sh
+scripts/extract_chromeos_firmware.sh
+```
+
+It downloads Google's official ChromeOS recovery image for the Pixelbook (1.8 GB), takes the audio folder out of it, and puts
+it in `<inputs>/chromeos/lib/firmware/intel/avs/`. It checks the result against a pinned hash. The default `<inputs>` folder
+is `~/googlebook-pixelbook/inputs`. You need `python3` and `debugfs` (`sudo apt install e2fsprogs`) and about 6 GB of free
+disk space while it runs. You can run it at any time, also after you removed ChromeOS from the Pixelbook.
+
+The files are byte-for-byte the same as the ones on a real Pixelbook.
+
+### Way 2: Copy them from the Pixelbook
+
+Do this **before** you remove ChromeOS.
 
 1. On the Pixelbook, sign in to ChromeOS. **Guest mode** works. ChromeOS mounts a USB stick only after sign-in.
 2. Insert a USB stick. Open VT2 (see [FIRMWARE.md](FIRMWARE.md#open-a-command-window)). Find the stick's name with
@@ -62,9 +81,8 @@ Without them the build works, but the Pixelbook has no sound.
    ```
 
 4. On your build PC, copy the folder `avs` to `<inputs>/chromeos/lib/firmware/intel/avs/`.
-   The default `<inputs>` folder is `~/googlebook-pixelbook/inputs`.
 
-Keep a second copy of the folder somewhere safe. After you remove ChromeOS, you cannot get the files again.
+Keep a second copy of the folder somewhere safe.
 
 ## Run the build
 
