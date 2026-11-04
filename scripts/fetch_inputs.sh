@@ -25,7 +25,7 @@ GBRUNCH_KIT_SHA=ba6eac2e2c1482bb3b0e4f4c1aee658b1dc488cce54e5ccbb2726e01fa3376c3
 
 . "$ROOT/scripts/pins.sh"     # recovery build, URL and hashes
 
-DONOR_URL="https://androidbuildinternal.googleapis.com/android/internal/build/v3/builds/16373615/aosp_cf_x86_64_only_phone-userdebug/attempts/latest/artifacts/aosp_cf_x86_64_only_phone-img-16373615.zip/url"
+DONOR_URL="https://ci.android.com/builds/submitted/16373615/aosp_cf_x86_64_only_phone-userdebug/latest/raw/aosp_cf_x86_64_only_phone-img-16373615.zip"
 DONOR_ZIP_BYTES=1163638742
 DONOR_ZIP_SHA=601d55e3197a2a612becc6931f111fd00caac5cbc70e0fa8261fbdb4cb22c695
 
@@ -91,15 +91,17 @@ mkdir -p "$IN/donor"
 if [ ! -e "$IN/donor/super.raw" ]; then
 	DZ="$IN/donor/aosp_cf_img-16373615.zip"
 	if [ ! -e "$DZ" ]; then
-		# ci.android.com serves this file through a signed redirect that only honours ranged requests reliably
+		# ci.android.com redirects to a signed storage.googleapis.com URL; fetch in ranged chunks so a dropped
+		# connection costs 64 MB, not the whole file. -f makes an HTTP error (404/403) fail instead of being
+		# saved as an HTML "chunk" and reported as a mysterious size mismatch.
 		: > "$DZ.part"; s=0; C=67108864
 		while [ $s -lt $DONOR_ZIP_BYTES ]; do
 			e=$((s + C - 1)); [ $e -ge $DONOR_ZIP_BYTES ] && e=$((DONOR_ZIP_BYTES - 1))
 			for try in 1 2 3 4 5; do
-				curl -sSL -r $s-$e -o "$IN/donor/chunk.tmp" "$DONOR_URL" && [ "$(stat -c %s "$IN/donor/chunk.tmp")" -eq $((e - s + 1)) ] && break
+				curl -fsSL -r $s-$e -o "$IN/donor/chunk.tmp" "$DONOR_URL" && [ "$(stat -c %s "$IN/donor/chunk.tmp")" -eq $((e - s + 1)) ] && break
 				sleep 3
 			done
-			[ "$(stat -c %s "$IN/donor/chunk.tmp")" -eq $((e - s + 1)) ] || { echo "donor download failed at byte $s"; exit 1; }
+			[ "$(stat -c %s "$IN/donor/chunk.tmp")" -eq $((e - s + 1)) ] || { echo "donor download failed at byte $s (URL: $DONOR_URL). Check 'curl -I' on that URL; if it is gone, download the ZIP by hand to $DZ and rerun."; exit 1; }
 			cat "$IN/donor/chunk.tmp" >> "$DZ.part"; s=$((e + 1))
 		done
 		rm -f "$IN/donor/chunk.tmp"; mv "$DZ.part" "$DZ"
